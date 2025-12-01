@@ -57,14 +57,16 @@ export namespace PermissionNext {
     const id = input.id ?? Identifier.ascending("permission")
     return new Promise<void>((resolve, reject) => {
       const s = state()
+      const info: Info = {
+        id,
+        ...input,
+      }
       s.pending[id] = {
-        info: {
-          id,
-          ...input,
-        },
+        info,
         resolve,
         reject,
       }
+      Bus.publish(Event.Updated, info)
     })
   })
 
