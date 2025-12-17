@@ -377,7 +377,41 @@ export namespace Config {
   export const Mcp = z.discriminatedUnion("type", [McpLocal, McpRemote])
   export type Mcp = z.infer<typeof Mcp>
 
-  export const Permission = z.enum(["ask", "allow", "deny"])
+  export const PermissionAction = z.enum(["ask", "allow", "deny"]).meta({
+    ref: "PermissionActionConfig",
+  })
+  export type PermissionAction = z.infer<typeof PermissionAction>
+
+  export const PermissionObject = z.record(z.string(), PermissionAction).meta({
+    ref: "PermissionObjectConfig",
+  })
+  export type PermissionObject = z.infer<typeof PermissionObject>
+
+  export const PermissionRule = z.union([PermissionAction, PermissionObject]).meta({
+    ref: "PermissionRuleConfig",
+  })
+  export type PermissionRule = z.infer<typeof PermissionRule>
+
+  export const Permission = z
+    .object({
+      read: PermissionRule.optional(),
+      edit: PermissionRule.optional(),
+      glob: PermissionRule.optional(),
+      grep: PermissionRule.optional(),
+      list: PermissionRule.optional(),
+      bash: PermissionRule.optional(),
+      task: PermissionRule.optional(),
+      external_directory: PermissionRule.optional(),
+      todowrite: PermissionAction.optional(),
+      todoread: PermissionAction.optional(),
+      websearch: PermissionAction.optional(),
+      codesearch: PermissionAction.optional(),
+      doom_loop: PermissionAction.optional(),
+    })
+    .catchall(PermissionRule)
+    .meta({
+      ref: "PermissionConfig",
+    })
   export type Permission = z.infer<typeof Permission>
 
   export const Command = z.object({
@@ -410,15 +444,7 @@ export namespace Config {
         .positive()
         .optional()
         .describe("Maximum number of agentic iterations before forcing text-only response"),
-      permission: z
-        .object({
-          edit: Permission.optional(),
-          bash: z.union([Permission, z.record(z.string(), Permission)]).optional(),
-          webfetch: Permission.optional(),
-          doom_loop: Permission.optional(),
-          external_directory: Permission.optional(),
-        })
-        .optional(),
+      permission: Permission.optional(),
     })
     .catchall(z.any())
     .meta({
@@ -748,15 +774,7 @@ export namespace Config {
         ),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
-      permission: z
-        .object({
-          edit: Permission.optional(),
-          bash: z.union([Permission, z.record(z.string(), Permission)]).optional(),
-          webfetch: Permission.optional(),
-          doom_loop: Permission.optional(),
-          external_directory: Permission.optional(),
-        })
-        .optional(),
+      permission: Permission.optional(),
       tools: z.record(z.string(), z.boolean()).optional(),
       enterprise: z
         .object({

@@ -11,6 +11,7 @@ import PROMPT_COMPACTION from "./prompt/compaction.txt"
 import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
+import { PermissionNext } from "@/permission/next"
 
 export namespace Agent {
   export const Info = z
@@ -23,13 +24,7 @@ export namespace Agent {
       topP: z.number().optional(),
       temperature: z.number().optional(),
       color: z.string().optional(),
-      permission: z.object({
-        edit: Config.Permission,
-        bash: z.record(z.string(), Config.Permission),
-        webfetch: Config.Permission.optional(),
-        doom_loop: Config.Permission.optional(),
-        external_directory: Config.Permission.optional(),
-      }),
+      permission: PermissionNext.Ruleset,
       model: z
         .object({
           modelID: z.string(),
@@ -37,7 +32,6 @@ export namespace Agent {
         })
         .optional(),
       prompt: z.string().optional(),
-      tools: z.record(z.string(), z.boolean()),
       options: z.record(z.string(), z.any()),
       maxSteps: z.number().int().positive().optional(),
     })
@@ -49,109 +43,80 @@ export namespace Agent {
   const state = Instance.state(async () => {
     const cfg = await Config.get()
     const defaultTools = cfg.tools ?? {}
-    const defaultPermission: Info["permission"] = {
-      edit: "allow",
-      bash: {
-        "*": "allow",
-      },
-      webfetch: "allow",
-      doom_loop: "ask",
-      external_directory: "ask",
-    }
-    const agentPermission = mergeAgentPermissions(defaultPermission, cfg.permission ?? {})
 
-    const planPermission = mergeAgentPermissions(
+    const permission: PermissionNext.Ruleset = mergeDeep(
       {
-        edit: "deny",
+        "*": {
+          "*": "allow",
+        },
+        edit: {
+          "*": "allow",
+        },
         bash: {
-          "cut*": "allow",
-          "diff*": "allow",
-          "du*": "allow",
-          "file *": "allow",
-          "find * -delete*": "ask",
-          "find * -exec*": "ask",
-          "find * -fprint*": "ask",
-          "find * -fls*": "ask",
-          "find * -fprintf*": "ask",
-          "find * -ok*": "ask",
-          "find *": "allow",
-          "git diff*": "allow",
-          "git log*": "allow",
-          "git show*": "allow",
-          "git status*": "allow",
-          "git branch": "allow",
-          "git branch -v": "allow",
-          "grep*": "allow",
-          "head*": "allow",
-          "less*": "allow",
-          "ls*": "allow",
-          "more*": "allow",
-          "pwd*": "allow",
-          "rg*": "allow",
-          "sort --output=*": "ask",
-          "sort -o *": "ask",
-          "sort*": "allow",
-          "stat*": "allow",
-          "tail*": "allow",
-          "tree -o *": "ask",
-          "tree*": "allow",
-          "uniq*": "allow",
-          "wc*": "allow",
-          "whereis*": "allow",
-          "which*": "allow",
+          "*": "allow",
+        },
+        webfetch: {
+          "*": "allow",
+        },
+        doom_loop: {
           "*": "ask",
         },
-        webfetch: "allow",
+        external_directory: {
+          "*": "ask",
+        },
       },
-      cfg.permission ?? {},
+      PermissionNext.fromConfig(cfg.permission ?? {}),
     )
 
     const result: Record<string, Info> = {
       build: {
         name: "build",
-        tools: { ...defaultTools },
         options: {},
-        permission: agentPermission,
+        permission,
         mode: "primary",
         native: true,
       },
       plan: {
         name: "plan",
         options: {},
-        permission: planPermission,
-        tools: {
-          ...defaultTools,
-        },
+        permission: mergeDeep(permission, {
+          edit: {
+            "*": "deny",
+            ".opencode/plan/*": "allow",
+          },
+        }),
         mode: "primary",
         native: true,
       },
       general: {
         name: "general",
         description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
-        tools: {
-          todoread: false,
-          todowrite: false,
-          ...defaultTools,
-        },
+        permission: mergeDeep(
+          permission,
+          PermissionNext.fromConfig({
+            todoread: "deny",
+            todowrite: "deny",
+          }),
+        ),
         options: {},
-        permission: agentPermission,
         mode: "subagent",
         native: true,
         hidden: true,
       },
       explore: {
         name: "explore",
-        tools: {
-          todoread: false,
-          todowrite: false,
-          edit: false,
-          write: false,
-          ...defaultTools,
-        },
+        permission: mergeDeep(
+          permission,
+          PermissionNext.fromConfig({
+            todoread: "deny",
+            todowrite: "deny",
+            edit: "deny",
+            write: "deny",
+          }),
+        ),
         description: `Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. "src/components/**/*.tsx"), search code for keywords (eg. "API endpoints"), or answer questions about the codebase (eg. "how do API endpoints work?"). When calling this agent, specify the desired thoroughness level: "quick" for basic searches, "medium" for moderate exploration, or "very thorough" for comprehensive analysis across multiple locations and naming conventions.`,
         prompt: PROMPT_EXPLORE,
         options: {},
-        permission: agentPermission,
         mode: "subagent",
         native: true,
       },
@@ -161,11 +126,10 @@ export namespace Agent {
         native: true,
         hidden: true,
         prompt: PROMPT_COMPACTION,
-        tools: {
-          "*": false,
-        },
+        permission: PermissionNext.fromConfig({
+          "*": "deny",
+        }),
         options: {},
-        permission: agentPermission,
       },
       title: {
         name: "title",
@@ -173,9 +137,10 @@ export namespace Agent {
         options: {},
         native: true,
         hidden: true,
-        permission: agentPermission,
+        permission: PermissionNext.fromConfig({
+          "*": "deny",
+        }),
         prompt: PROMPT_TITLE,
-        tools: {},
       },
       summary: {
         name: "summary",
@@ -183,11 +148,13 @@ export namespace Agent {
         options: {},
         native: true,
         hidden: true,
-        permission: agentPermission,
+        permission: PermissionNext.fromConfig({
+          "*": "deny",
+        }),
         prompt: PROMPT_SUMMARY,
-        tools: {},
       },
     }
+
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {
       if (value.disable) {
         delete result[key]
@@ -198,9 +165,8 @@ export namespace Agent {
         item = result[key] = {
           name: key,
           mode: "all",
-          permission: agentPermission,
+          permission: permission,
           options: {},
-          tools: {},
           native: false,
         }
       const {

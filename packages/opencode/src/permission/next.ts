@@ -1,11 +1,37 @@
 import { Bus } from "@/bus"
+import { BusEvent } from "@/bus/bus-event"
+import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
 import { fn } from "@/util/fn"
 import z from "zod"
 
 export namespace PermissionNext {
-  export const Info = z
+  export const Rule = Config.PermissionObject.meta({
+    ref: "PermissionRule",
+  })
+  export type Rule = z.infer<typeof Rule>
+
+  export const Ruleset = z.record(z.string(), Rule).meta({
+    ref: "PermissionRuleset",
+  })
+  export type Ruleset = z.infer<typeof Ruleset>
+
+  export function fromConfig(permission: Config.Permission) {
+    const ruleset: Ruleset = {}
+    for (const [key, value] of Object.entries(permission)) {
+      if (typeof value === "string") {
+        ruleset[key] = {
+          "*": value,
+        }
+        continue
+      }
+      ruleset[key] = value
+    }
+    return ruleset
+  }
+
+  export const Request = z
     .object({
       id: Identifier.schema("permission"),
       sessionID: Identifier.schema("session"),
@@ -16,10 +42,10 @@ export namespace PermissionNext {
       patterns: z.string().array().optional(),
     })
     .meta({
-      ref: "PermissionNext",
+      ref: "PermissionRequest",
     })
 
-  export type Info = z.infer<typeof Info>
+  export type Request = z.infer<typeof Request>
 
   export const Response = z.enum(["once", "always", "reject"])
   export type Response = z.infer<typeof Response>
@@ -30,14 +56,14 @@ export namespace PermissionNext {
   })
 
   export const Event = {
-    Updated: Bus.event("permission.next.updated", Info),
+    Updated: BusEvent.define("permission.request", Request),
   }
 
   const state = Instance.state(() => {
     const pending: Record<
       string,
       {
-        info: Info
+        info: Request
         resolve: () => void
         reject: (e: any) => void
       }
@@ -53,11 +79,11 @@ export namespace PermissionNext {
     }
   })
 
-  export const ask = fn(Info.partial({ id: true }), async (input) => {
+  export const ask = fn(Request.partial({ id: true }), async (input) => {
     const id = input.id ?? Identifier.ascending("permission")
     return new Promise<void>((resolve, reject) => {
       const s = state()
-      const info: Info = {
+      const info: Request = {
         id,
         ...input,
       }
@@ -89,6 +115,15 @@ export namespace PermissionNext {
       if (input.response === "always") {
       }
     },
+  )
+
+  export const evaluate = fn(
+    z.object({
+      permission: z.string(),
+      pattern: z.string(),
+      rules: Config.Permission.array(),
+    }),
+    async (input) => {},
   )
 
   export class RejectedError extends Error {
