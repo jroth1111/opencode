@@ -205,11 +205,13 @@ test("handles agent configuration", async () => {
     directory: tmp.path,
     fn: async () => {
       const config = await Config.get()
-      expect(config.agent?.["test_agent"]).toEqual({
-        model: "test/model",
-        temperature: 0.7,
-        description: "test agent",
-      })
+      expect(config.agent?.["test_agent"]).toEqual(
+        expect.objectContaining({
+          model: "test/model",
+          temperature: 0.7,
+          description: "test agent",
+        }),
+      )
     },
   })
 })
@@ -292,6 +294,8 @@ test("migrates mode field to agent field", async () => {
         model: "test/model",
         temperature: 0.5,
         mode: "primary",
+        options: {},
+        permission: {},
       })
     },
   })
@@ -318,11 +322,13 @@ Test agent prompt`,
     directory: tmp.path,
     fn: async () => {
       const config = await Config.get()
-      expect(config.agent?.["test"]).toEqual({
-        name: "test",
-        model: "test/model",
-        prompt: "Test agent prompt",
-      })
+      expect(config.agent?.["test"]).toEqual(
+        expect.objectContaining({
+          name: "test",
+          model: "test/model",
+          prompt: "Test agent prompt",
+        }),
+      )
     },
   })
 })

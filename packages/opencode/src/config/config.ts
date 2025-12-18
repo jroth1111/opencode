@@ -429,7 +429,7 @@ export namespace Config {
       temperature: z.number().optional(),
       top_p: z.number().optional(),
       prompt: z.string().optional(),
-      tools: z.record(z.string(), z.boolean()).optional(),
+      tools: z.record(z.string(), z.boolean()).optional().describe("@deprecated Use 'permission' field instead"),
       disable: z.boolean().optional(),
       description: z.string().optional().describe("Description of when to use the agent"),
       mode: z.enum(["subagent", "primary", "all"]).optional(),
@@ -449,6 +449,47 @@ export namespace Config {
       permission: Permission.optional(),
     })
     .catchall(z.any())
+    .transform((agent) => {
+      const knownKeys = new Set([
+        "name",
+        "model",
+        "prompt",
+        "description",
+        "temperature",
+        "top_p",
+        "mode",
+        "color",
+        "steps",
+        "maxSteps",
+        "options",
+        "permission",
+        "disable",
+        "tools",
+      ])
+
+      // Extract unknown properties into options
+      const options: Record<string, unknown> = { ...agent.options }
+      for (const [key, value] of Object.entries(agent)) {
+        if (!knownKeys.has(key)) options[key] = value
+      }
+
+      // Convert legacy tools config to permissions
+      const permission: Permission = { ...agent.permission }
+      for (const [tool, enabled] of Object.entries(agent.tools ?? {})) {
+        const action = enabled ? "allow" : "deny"
+        // write, edit, patch, multiedit all map to edit permission
+        if (tool === "write" || tool === "edit" || tool === "patch" || tool === "multiedit") {
+          permission.edit = action
+        } else {
+          permission[tool] = action
+        }
+      }
+
+      return { ...agent, options, permission } as typeof agent & {
+        options: Record<string, unknown>
+        permission: Permission
+      }
+    })
     .meta({
       ref: "AgentConfig",
     })

@@ -389,3 +389,47 @@ test("webfetch is allowed by default", async () => {
     },
   })
 })
+
+test("legacy tools config converts to permissions", async () => {
+  await using tmp = await tmpdir({
+    config: {
+      agent: {
+        build: {
+          tools: {
+            bash: false,
+            read: false,
+          },
+        },
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const build = await Agent.get("build")
+      expect(build?.permission.bash?.["*"]).toBe("deny")
+      expect(build?.permission.read?.["*"]).toBe("deny")
+    },
+  })
+})
+
+test("legacy tools config maps write/edit/patch/multiedit to edit permission", async () => {
+  await using tmp = await tmpdir({
+    config: {
+      agent: {
+        build: {
+          tools: {
+            write: false,
+          },
+        },
+      },
+    },
+  })
+  await Instance.provide({
+    directory: tmp.path,
+    fn: async () => {
+      const build = await Agent.get("build")
+      expect(build?.permission.edit?.["*"]).toBe("deny")
+    },
+  })
+})

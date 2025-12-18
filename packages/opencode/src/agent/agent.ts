@@ -11,7 +11,7 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { PermissionNext } from "@/permission/next"
-import { mergeDeep, pipe } from "remeda"
+import { mergeDeep } from "remeda"
 
 export namespace Agent {
   export const Info = z
@@ -151,23 +151,6 @@ export namespace Agent {
       },
     }
 
-    const knownKeys = new Set([
-      "model",
-      "prompt",
-      "description",
-      "temperature",
-      "top_p",
-      "mode",
-      "color",
-      "name",
-      "steps",
-      "maxSteps",
-      "options",
-      "permission",
-      "disable",
-      "tools",
-    ])
-
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {
       if (value.disable) {
         delete result[key]
@@ -195,14 +178,7 @@ export namespace Agent {
       item.color = value.color ?? item.color
       item.name = value.name ?? item.name
       item.steps = value.steps ?? value.maxSteps ?? item.steps
-
-      // Extract unknown properties and merge into options (legacy behavior)
-      const unknown: Record<string, unknown> = {}
-      for (const [k, v] of Object.entries(value)) {
-        if (!knownKeys.has(k)) unknown[k] = v
-      }
-      item.options = pipe(item.options, mergeDeep(value.options ?? {}), mergeDeep(unknown))
-
+      item.options = mergeDeep(item.options, value.options ?? {})
       item.permission = PermissionNext.merge(
         item.permission,
         PermissionNext.fromConfig(cfg.permission ?? {}),
