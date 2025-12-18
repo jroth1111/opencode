@@ -4,6 +4,7 @@ import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
 import { fn } from "@/util/fn"
+import { Wildcard } from "@/util/wildcard"
 import z from "zod"
 
 export namespace PermissionNext {
@@ -29,6 +30,24 @@ export namespace PermissionNext {
       ruleset[key] = value
     }
     return ruleset
+  }
+
+  export function merge(...rulesets: Ruleset[]): Ruleset {
+    const result: Ruleset = {}
+    for (const ruleset of rulesets) {
+      for (const [permission, rule] of Object.entries(ruleset)) {
+        result[permission] ??= {}
+        for (const [pattern, action] of Object.entries(rule)) {
+          for (const existing of Object.keys(result[permission])) {
+            if (Wildcard.match(existing, pattern)) {
+              delete result[permission][existing]
+            }
+          }
+          result[permission][pattern] = action
+        }
+      }
+    }
+    return result
   }
 
   export const Request = z
@@ -117,14 +136,23 @@ export namespace PermissionNext {
     },
   )
 
-  export const evaluate = fn(
-    z.object({
-      permission: z.string(),
-      pattern: z.string(),
-      rules: Config.Permission.array(),
-    }),
-    async (input) => {},
-  )
+  export const Action = z.enum(["allow", "deny", "ask"])
+  export type Action = z.infer<typeof Action>
+
+  export function evaluate(permission: string, pattern: string, ruleset: Ruleset): Action {
+    const rule = ruleset[permission]
+    if (!rule) return "ask"
+
+    let best: { length: number; action: Action } | undefined
+    for (const [p, action] of Object.entries(rule)) {
+      if (!Wildcard.match(pattern, p)) continue
+      if (!best || p.length > best.length) {
+        best = { length: p.length, action }
+      }
+    }
+
+    return best?.action ?? "ask"
+  }
 
   export class RejectedError extends Error {
     constructor(public readonly reason?: string) {

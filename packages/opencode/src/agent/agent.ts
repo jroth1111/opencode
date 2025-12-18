@@ -4,7 +4,6 @@ import { Provider } from "../provider/provider"
 import { generateObject, type ModelMessage } from "ai"
 import { SystemPrompt } from "../session/system"
 import { Instance } from "../project/instance"
-import { mergeDeep } from "remeda"
 
 import PROMPT_GENERATE from "./generate.txt"
 import PROMPT_COMPACTION from "./prompt/compaction.txt"
@@ -33,7 +32,7 @@ export namespace Agent {
         .optional(),
       prompt: z.string().optional(),
       options: z.record(z.string(), z.any()),
-      maxSteps: z.number().int().positive().optional(),
+      steps: z.number().int().positive().optional(),
     })
     .meta({
       ref: "Agent",
@@ -44,11 +43,8 @@ export namespace Agent {
     const cfg = await Config.get()
     const defaultTools = cfg.tools ?? {}
 
-    const permission: PermissionNext.Ruleset = mergeDeep(
+    const permission: PermissionNext.Ruleset = PermissionNext.merge(
       {
-        "*": {
-          "*": "allow",
-        },
         edit: {
           "*": "allow",
         },
@@ -79,7 +75,7 @@ export namespace Agent {
       plan: {
         name: "plan",
         options: {},
-        permission: mergeDeep(permission, {
+        permission: PermissionNext.merge(permission, {
           edit: {
             "*": "deny",
             ".opencode/plan/*": "allow",
@@ -91,7 +87,7 @@ export namespace Agent {
       general: {
         name: "general",
         description: `General-purpose agent for researching complex questions and executing multi-step tasks. Use this agent to execute multiple units of work in parallel.`,
-        permission: mergeDeep(
+        permission: PermissionNext.merge(
           permission,
           PermissionNext.fromConfig({
             todoread: "deny",
@@ -105,7 +101,7 @@ export namespace Agent {
       },
       explore: {
         name: "explore",
-        permission: mergeDeep(
+        permission: PermissionNext.merge(
           permission,
           PermissionNext.fromConfig({
             todoread: "deny",
@@ -205,7 +201,7 @@ export namespace Agent {
       if (color) item.color = color
       // just here for consistency & to prevent it from being added as an option
       if (name) item.name = name
-      if (maxSteps != undefined) item.maxSteps = maxSteps
+      if (maxSteps != undefined) item.steps = maxSteps
 
       if (permission ?? cfg.permission) {
         item.permission = mergeAgentPermissions(cfg.permission ?? {}, permission ?? {})
