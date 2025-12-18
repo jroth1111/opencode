@@ -447,6 +447,21 @@ export type EventMessagePartRemoved = {
   }
 }
 
+export type PermissionRequest = {
+  id: string
+  sessionID: string
+  type: string
+  title: string
+  description: string
+  keys: Array<string>
+  patterns?: Array<string>
+}
+
+export type EventPermissionRequest = {
+  type: "permission.request"
+  properties: PermissionRequest
+}
+
 export type Permission = {
   id: string
   type: string
@@ -745,6 +760,7 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
+  | EventPermissionRequest
   | EventPermissionUpdated
   | EventPermissionReplied
   | EventFileEdited
@@ -1112,6 +1128,31 @@ export type KeybindsConfig = {
   terminal_suspend?: string
 }
 
+export type PermissionActionConfig = "ask" | "allow" | "deny"
+
+export type PermissionObjectConfig = {
+  [key: string]: PermissionActionConfig
+}
+
+export type PermissionRuleConfig = PermissionActionConfig | PermissionObjectConfig
+
+export type PermissionConfig = {
+  read?: PermissionRuleConfig
+  edit?: PermissionRuleConfig
+  glob?: PermissionRuleConfig
+  grep?: PermissionRuleConfig
+  list?: PermissionRuleConfig
+  bash?: PermissionRuleConfig
+  task?: PermissionRuleConfig
+  external_directory?: PermissionRuleConfig
+  todowrite?: PermissionActionConfig
+  todoread?: PermissionActionConfig
+  websearch?: PermissionActionConfig
+  codesearch?: PermissionActionConfig
+  doom_loop?: PermissionActionConfig
+  [key: string]: PermissionRuleConfig | PermissionActionConfig | undefined
+}
+
 export type AgentConfig = {
   model?: string
   temperature?: number
@@ -1134,19 +1175,7 @@ export type AgentConfig = {
    * Maximum number of agentic iterations before forcing text-only response
    */
   maxSteps?: number
-  permission?: {
-    edit?: "ask" | "allow" | "deny"
-    bash?:
-      | "ask"
-      | "allow"
-      | "deny"
-      | {
-          [key: string]: "ask" | "allow" | "deny"
-        }
-    webfetch?: "ask" | "allow" | "deny"
-    doom_loop?: "ask" | "allow" | "deny"
-    external_directory?: "ask" | "allow" | "deny"
-  }
+  permission?: PermissionConfig
   [key: string]:
     | unknown
     | string
@@ -1160,19 +1189,7 @@ export type AgentConfig = {
     | "all"
     | string
     | number
-    | {
-        edit?: "ask" | "allow" | "deny"
-        bash?:
-          | "ask"
-          | "allow"
-          | "deny"
-          | {
-              [key: string]: "ask" | "allow" | "deny"
-            }
-        webfetch?: "ask" | "allow" | "deny"
-        doom_loop?: "ask" | "allow" | "deny"
-        external_directory?: "ask" | "allow" | "deny"
-      }
+    | PermissionConfig
     | undefined
 }
 
@@ -1475,19 +1492,7 @@ export type Config = {
    */
   instructions?: Array<string>
   layout?: LayoutConfig
-  permission?: {
-    edit?: "ask" | "allow" | "deny"
-    bash?:
-      | "ask"
-      | "allow"
-      | "deny"
-      | {
-          [key: string]: "ask" | "allow" | "deny"
-        }
-    webfetch?: "ask" | "allow" | "deny"
-    doom_loop?: "ask" | "allow" | "deny"
-    external_directory?: "ask" | "allow" | "deny"
-  }
+  permission?: PermissionConfig
   tools?: {
     [key: string]: boolean
   }
@@ -1749,6 +1754,14 @@ export type File = {
   status: "added" | "deleted" | "modified"
 }
 
+export type PermissionRule = {
+  [key: string]: PermissionActionConfig
+}
+
+export type PermissionRuleset = {
+  [key: string]: PermissionRule
+}
+
 export type Agent = {
   name: string
   description?: string
@@ -1758,27 +1771,16 @@ export type Agent = {
   topP?: number
   temperature?: number
   color?: string
-  permission: {
-    edit: "ask" | "allow" | "deny"
-    bash: {
-      [key: string]: "ask" | "allow" | "deny"
-    }
-    webfetch?: "ask" | "allow" | "deny"
-    doom_loop?: "ask" | "allow" | "deny"
-    external_directory?: "ask" | "allow" | "deny"
-  }
+  permission: PermissionRuleset
   model?: {
     modelID: string
     providerID: string
   }
   prompt?: string
-  tools: {
-    [key: string]: boolean
-  }
   options: {
     [key: string]: unknown
   }
-  maxSteps?: number
+  steps?: number
 }
 
 export type McpStatusConnected = {

@@ -6068,6 +6068,54 @@
         },
         "required": ["type", "properties"]
       },
+      "PermissionRequest": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^per.*"
+          },
+          "sessionID": {
+            "type": "string",
+            "pattern": "^ses.*"
+          },
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "patterns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["id", "sessionID", "type", "title", "description", "keys"]
+      },
+      "Event.permission.request": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "const": "permission.request"
+          },
+          "properties": {
+            "$ref": "#/components/schemas/PermissionRequest"
+          }
+        },
+        "required": ["type", "properties"]
+      },
       "Permission": {
         "type": "object",
         "properties": {
@@ -6888,6 +6936,9 @@
             "$ref": "#/components/schemas/Event.message.part.removed"
           },
           {
+            "$ref": "#/components/schemas/Event.permission.request"
+          },
+          {
             "$ref": "#/components/schemas/Event.permission.updated"
           },
           {
@@ -7415,6 +7466,76 @@
         },
         "additionalProperties": false
       },
+      "PermissionActionConfig": {
+        "type": "string",
+        "enum": ["ask", "allow", "deny"]
+      },
+      "PermissionObjectConfig": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PermissionActionConfig"
+        }
+      },
+      "PermissionRuleConfig": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          },
+          {
+            "$ref": "#/components/schemas/PermissionObjectConfig"
+          }
+        ]
+      },
+      "PermissionConfig": {
+        "type": "object",
+        "properties": {
+          "read": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "edit": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "glob": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "grep": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "list": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "bash": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "task": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "external_directory": {
+            "$ref": "#/components/schemas/PermissionRuleConfig"
+          },
+          "todowrite": {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          },
+          "todoread": {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          },
+          "websearch": {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          },
+          "codesearch": {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          },
+          "doom_loop": {
+            "$ref": "#/components/schemas/PermissionActionConfig"
+          }
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PermissionRuleConfig"
+        }
+      },
       "AgentConfig": {
         "type": "object",
         "properties": {
@@ -7462,43 +7583,7 @@
             "maximum": 9007199254740991
           },
           "permission": {
-            "type": "object",
-            "properties": {
-              "edit": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "bash": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": ["ask", "allow", "deny"]
-                  },
-                  {
-                    "type": "object",
-                    "propertyNames": {
-                      "type": "string"
-                    },
-                    "additionalProperties": {
-                      "type": "string",
-                      "enum": ["ask", "allow", "deny"]
-                    }
-                  }
-                ]
-              },
-              "webfetch": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "doom_loop": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "external_directory": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              }
-            }
+            "$ref": "#/components/schemas/PermissionConfig"
           }
         },
         "additionalProperties": {}
@@ -8166,43 +8251,7 @@
             "$ref": "#/components/schemas/LayoutConfig"
           },
           "permission": {
-            "type": "object",
-            "properties": {
-              "edit": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "bash": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "enum": ["ask", "allow", "deny"]
-                  },
-                  {
-                    "type": "object",
-                    "propertyNames": {
-                      "type": "string"
-                    },
-                    "additionalProperties": {
-                      "type": "string",
-                      "enum": ["ask", "allow", "deny"]
-                    }
-                  }
-                ]
-              },
-              "webfetch": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "doom_loop": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "external_directory": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              }
-            }
+            "$ref": "#/components/schemas/PermissionConfig"
           },
           "tools": {
             "type": "object",
@@ -8951,6 +9000,24 @@
         },
         "required": ["path", "added", "removed", "status"]
       },
+      "PermissionRule": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PermissionActionConfig"
+        }
+      },
+      "PermissionRuleset": {
+        "type": "object",
+        "propertyNames": {
+          "type": "string"
+        },
+        "additionalProperties": {
+          "$ref": "#/components/schemas/PermissionRule"
+        }
+      },
       "Agent": {
         "type": "object",
         "properties": {
@@ -8980,36 +9047,7 @@
             "type": "string"
           },
           "permission": {
-            "type": "object",
-            "properties": {
-              "edit": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "bash": {
-                "type": "object",
-                "propertyNames": {
-                  "type": "string"
-                },
-                "additionalProperties": {
-                  "type": "string",
-                  "enum": ["ask", "allow", "deny"]
-                }
-              },
-              "webfetch": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "doom_loop": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              },
-              "external_directory": {
-                "type": "string",
-                "enum": ["ask", "allow", "deny"]
-              }
-            },
-            "required": ["edit", "bash"]
+            "$ref": "#/components/schemas/PermissionRuleset"
           },
           "model": {
             "type": "object",
@@ -9026,15 +9064,6 @@
           "prompt": {
             "type": "string"
           },
-          "tools": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {
-              "type": "boolean"
-            }
-          },
           "options": {
             "type": "object",
             "propertyNames": {
@@ -9042,13 +9071,13 @@
             },
             "additionalProperties": {}
           },
-          "maxSteps": {
+          "steps": {
             "type": "integer",
             "exclusiveMinimum": 0,
             "maximum": 9007199254740991
           }
         },
-        "required": ["name", "mode", "permission", "tools", "options"]
+        "required": ["name", "mode", "permission", "options"]
       },
       "MCPStatusConnected": {
         "type": "object",
