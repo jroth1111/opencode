@@ -11,6 +11,7 @@ import PROMPT_EXPLORE from "./prompt/explore.txt"
 import PROMPT_SUMMARY from "./prompt/summary.txt"
 import PROMPT_TITLE from "./prompt/title.txt"
 import { PermissionNext } from "@/permission/next"
+import { mergeDeep, pipe } from "remeda"
 
 export namespace Agent {
   export const Info = z
@@ -41,7 +42,6 @@ export namespace Agent {
 
   const state = Instance.state(async () => {
     const cfg = await Config.get()
-    const defaultTools = cfg.tools ?? {}
 
     const permission: PermissionNext.Ruleset = PermissionNext.merge(
       {
@@ -151,6 +151,23 @@ export namespace Agent {
       },
     }
 
+    const knownKeys = new Set([
+      "model",
+      "prompt",
+      "description",
+      "temperature",
+      "top_p",
+      "mode",
+      "color",
+      "name",
+      "steps",
+      "maxSteps",
+      "options",
+      "permission",
+      "disable",
+      "tools",
+    ])
+
     for (const [key, value] of Object.entries(cfg.agent ?? {})) {
       if (value.disable) {
         delete result[key]
@@ -161,51 +178,36 @@ export namespace Agent {
         item = result[key] = {
           name: key,
           mode: "all",
-          permission: permission,
+          permission: {
+            "*": {
+              "*": "allow",
+            },
+          },
           options: {},
           native: false,
         }
-      const {
-        name,
-        model,
-        prompt,
-        tools,
-        description,
-        temperature,
-        top_p,
-        mode,
-        permission,
-        color,
-        maxSteps,
-        ...extra
-      } = value
-      item.options = {
-        ...item.options,
-        ...extra,
-      }
-      if (model) item.model = Provider.parseModel(model)
-      if (prompt) item.prompt = prompt
-      if (tools)
-        item.tools = {
-          ...item.tools,
-          ...tools,
-        }
-      item.tools = {
-        ...defaultTools,
-        ...item.tools,
-      }
-      if (description) item.description = description
-      if (temperature != undefined) item.temperature = temperature
-      if (top_p != undefined) item.topP = top_p
-      if (mode) item.mode = mode
-      if (color) item.color = color
-      // just here for consistency & to prevent it from being added as an option
-      if (name) item.name = name
-      if (maxSteps != undefined) item.steps = maxSteps
+      if (value.model) item.model = Provider.parseModel(value.model)
+      item.prompt = value.prompt ?? item.prompt
+      item.description = value.description ?? item.description
+      item.temperature = value.temperature ?? item.temperature
+      item.topP = value.top_p ?? item.topP
+      item.mode = value.mode ?? item.mode
+      item.color = value.color ?? item.color
+      item.name = value.name ?? item.name
+      item.steps = value.steps ?? value.maxSteps ?? item.steps
 
-      if (permission ?? cfg.permission) {
-        item.permission = mergeAgentPermissions(cfg.permission ?? {}, permission ?? {})
+      // Extract unknown properties and merge into options (legacy behavior)
+      const unknown: Record<string, unknown> = {}
+      for (const [k, v] of Object.entries(value)) {
+        if (!knownKeys.has(k)) unknown[k] = v
       }
+      item.options = pipe(item.options, mergeDeep(value.options ?? {}), mergeDeep(unknown))
+
+      item.permission = PermissionNext.merge(
+        item.permission,
+        PermissionNext.fromConfig(cfg.permission ?? {}),
+        PermissionNext.fromConfig(value.permission ?? {}),
+      )
     }
     return result
   })
@@ -255,43 +257,4 @@ export namespace Agent {
     })
     return result.object
   }
-}
-
-function mergeAgentPermissions(basePermission: any, overridePermission: any): Agent.Info["permission"] {
-  if (typeof basePermission.bash === "string") {
-    basePermission.bash = {
-      "*": basePermission.bash,
-    }
-  }
-  if (typeof overridePermission.bash === "string") {
-    overridePermission.bash = {
-      "*": overridePermission.bash,
-    }
-  }
-  const merged = mergeDeep(basePermission ?? {}, overridePermission ?? {}) as any
-  let mergedBash
-  if (merged.bash) {
-    if (typeof merged.bash === "string") {
-      mergedBash = {
-        "*": merged.bash,
-      }
-    } else if (typeof merged.bash === "object") {
-      mergedBash = mergeDeep(
-        {
-          "*": "allow",
-        },
-        merged.bash,
-      )
-    }
-  }
-
-  const result: Agent.Info["permission"] = {
-    edit: merged.edit ?? "allow",
-    webfetch: merged.webfetch ?? "allow",
-    bash: mergedBash ?? { "*": "allow" },
-    doom_loop: merged.doom_loop,
-    external_directory: merged.external_directory,
-  }
-
-  return result
 }

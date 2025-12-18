@@ -433,17 +433,19 @@ export namespace Config {
       disable: z.boolean().optional(),
       description: z.string().optional().describe("Description of when to use the agent"),
       mode: z.enum(["subagent", "primary", "all"]).optional(),
+      options: z.record(z.string(), z.any()).optional(),
       color: z
         .string()
         .regex(/^#[0-9a-fA-F]{6}$/, "Invalid hex color format")
         .optional()
         .describe("Hex color code for the agent (e.g., #FF5733)"),
-      maxSteps: z
+      steps: z
         .number()
         .int()
         .positive()
         .optional()
         .describe("Maximum number of agentic iterations before forcing text-only response"),
+      maxSteps: z.number().int().positive().optional().describe("@deprecated Use 'steps' field instead."),
       permission: Permission.optional(),
     })
     .catchall(z.any())
