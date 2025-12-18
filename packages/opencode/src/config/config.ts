@@ -404,6 +404,7 @@ export namespace Config {
       external_directory: PermissionRule.optional(),
       todowrite: PermissionAction.optional(),
       todoread: PermissionAction.optional(),
+      webfetch: PermissionAction.optional(),
       websearch: PermissionAction.optional(),
       codesearch: PermissionAction.optional(),
       doom_loop: PermissionAction.optional(),
@@ -451,7 +452,6 @@ export namespace Config {
     .catchall(z.any())
     .transform((agent) => {
       const knownKeys = new Set([
-        "name",
         "model",
         "prompt",
         "description",
@@ -485,9 +485,13 @@ export namespace Config {
         }
       }
 
-      return { ...agent, options, permission } as typeof agent & {
-        options: Record<string, unknown>
-        permission: Permission
+      // Convert legacy maxSteps to steps
+      const steps = agent.steps ?? agent.maxSteps
+
+      return { ...agent, options, permission, steps } as typeof agent & {
+        options?: Record<string, unknown>
+        permission?: Permission
+        steps?: number
       }
     })
     .meta({

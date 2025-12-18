@@ -10,6 +10,7 @@ import { FileTime } from "../file/time"
 import { Filesystem } from "../util/filesystem"
 import { Instance } from "../project/instance"
 import { Agent } from "../agent/agent"
+import { PermissionNext } from "@/permission/next"
 
 const MAX_DIAGNOSTICS_PER_FILE = 20
 const MAX_PROJECT_DIAGNOSTICS_FILES = 5
@@ -24,6 +25,7 @@ export const WriteTool = Tool.define("write", {
     const agent = await Agent.get(ctx.agent)
 
     const filepath = path.isAbsolute(params.filePath) ? params.filePath : path.join(Instance.directory, params.filePath)
+    /* TODO
     if (!Filesystem.contains(Instance.directory, filepath)) {
       const parentDir = path.dirname(filepath)
       if (agent.permission.external_directory === "ask") {
@@ -52,24 +54,24 @@ export const WriteTool = Tool.define("write", {
         )
       }
     }
+    */
 
     const file = Bun.file(filepath)
     const exists = await file.exists()
     if (exists) await FileTime.assert(ctx.sessionID, filepath)
 
-    if (agent.permission.edit === "ask")
-      await Permission.ask({
-        type: "write",
-        sessionID: ctx.sessionID,
-        messageID: ctx.messageID,
-        callID: ctx.callID,
-        title: exists ? "Overwrite this file: " + filepath : "Create new file: " + filepath,
-        metadata: {
-          filePath: filepath,
-          content: params.content,
-          exists,
-        },
-      })
+    await PermissionNext.request({
+      permission: "edit",
+      title: "tbd",
+      patterns: [path.relative(Instance.worktree, filepath)],
+      always: ["*"],
+      sessionID: ctx.sessionID,
+      metadata: {},
+      description: exists
+        ? "Overwrite this file: " + path.relative(Instance.directory, filepath)
+        : "Create new file: " + path.relative(Instance.directory, filepath),
+      ruleset: agent.permission,
+    })
 
     await Bun.write(filepath, params.content)
     await Bus.publish(File.Event.Edited, {

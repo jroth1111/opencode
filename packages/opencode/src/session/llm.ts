@@ -188,11 +188,7 @@ export namespace LLM {
   }
 
   async function resolveTools(input: Pick<StreamInput, "tools" | "agent" | "user">) {
-    const enabled = pipe(
-      input.agent.tools,
-      mergeDeep(await ToolRegistry.enabled(input.agent)),
-      mergeDeep(input.user.tools ?? {}),
-    )
+    const enabled = pipe({}, mergeDeep(await ToolRegistry.enabled(input.agent)), mergeDeep(input.user.tools ?? {}))
     for (const [key, value] of Object.entries(enabled)) {
       if (value === false) delete input.tools[key]
     }

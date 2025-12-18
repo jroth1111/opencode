@@ -5,11 +5,7 @@ import { useTheme } from "../context/theme"
 
 export function Permission() {
   const dialog = useDialog()
-  onMount(() => {
-    setTimeout(() => {
-      dialog.replace(() => <DialogPermission />)
-    }, 2000)
-  })
+  onMount(() => {})
   return null
 }
 

@@ -4,10 +4,14 @@ import { Config } from "@/config/config"
 import { Identifier } from "@/id/id"
 import { Instance } from "@/project/instance"
 import { fn } from "@/util/fn"
+import { Log } from "@/util/log"
 import { Wildcard } from "@/util/wildcard"
+import { sortBy } from "remeda"
 import z from "zod"
 
 export namespace PermissionNext {
+  const log = Log.create({ service: "permission" })
+
   export const Rule = Config.PermissionObject.meta({
     ref: "PermissionRule",
   })
@@ -36,13 +40,19 @@ export namespace PermissionNext {
     const result: Ruleset = {}
     for (const ruleset of rulesets) {
       for (const [permission, rule] of Object.entries(ruleset)) {
-        result[permission] ??= {}
-        for (const [pattern, action] of Object.entries(rule)) {
-          for (const existing of Object.keys(result[permission])) {
-            if (Wildcard.match(existing, pattern)) {
-              delete result[permission][existing]
+        for (const existingPerm of Object.keys(result)) {
+          if (Wildcard.match(existingPerm, permission)) {
+            for (const [pattern, action] of Object.entries(rule)) {
+              for (const existingPattern of Object.keys(result[existingPerm])) {
+                if (Wildcard.match(existingPattern, pattern)) {
+                  result[existingPerm][existingPattern] = action
+                }
+              }
             }
           }
+        }
+        result[permission] ??= {}
+        for (const [pattern, action] of Object.entries(rule)) {
           result[permission][pattern] = action
         }
       }
@@ -54,11 +64,12 @@ export namespace PermissionNext {
     .object({
       id: Identifier.schema("permission"),
       sessionID: Identifier.schema("session"),
-      type: z.string(),
+      patterns: z.string().array(),
       title: z.string(),
       description: z.string(),
-      keys: z.string().array(),
-      patterns: z.string().array().optional(),
+      metadata: z.record(z.string(), z.any()),
+      always: z.string().array(),
+      permission: z.string(),
     })
     .meta({
       ref: "PermissionRequest",
@@ -75,7 +86,7 @@ export namespace PermissionNext {
   })
 
   export const Event = {
-    Updated: BusEvent.define("permission.request", Request),
+    Requested: BusEvent.define("permission.requested", Request),
   }
 
   const state = Instance.state(() => {
@@ -98,22 +109,36 @@ export namespace PermissionNext {
     }
   })
 
-  export const ask = fn(Request.partial({ id: true }), async (input) => {
-    const id = input.id ?? Identifier.ascending("permission")
-    return new Promise<void>((resolve, reject) => {
-      const s = state()
-      const info: Request = {
-        id,
-        ...input,
+  export const request = fn(
+    Request.partial({ id: true }).extend({
+      ruleset: Ruleset,
+    }),
+    async (input) => {
+      const { ruleset, ...request } = input
+      for (const pattern of request.patterns ?? []) {
+        const action = evaluate(request.permission, pattern, ruleset)
+        log.info("evaluated", { permission: request.permission, pattern, action })
+        if (action === "deny") throw new RejectedError()
+        if (action === "ask") {
+          const id = input.id ?? Identifier.ascending("permission")
+          return new Promise<void>((resolve, reject) => {
+            const s = state()
+            const info: Request = {
+              id,
+              ...request,
+            }
+            s.pending[id] = {
+              info,
+              resolve,
+              reject,
+            }
+            Bus.publish(Event.Requested, info)
+          })
+        }
+        if (action === "allow") continue
       }
-      s.pending[id] = {
-        info,
-        resolve,
-        reject,
-      }
-      Bus.publish(Event.Updated, info)
-    })
-  })
+    },
+  )
 
   export const respond = fn(
     z.object({
@@ -140,18 +165,15 @@ export namespace PermissionNext {
   export type Action = z.infer<typeof Action>
 
   export function evaluate(permission: string, pattern: string, ruleset: Ruleset): Action {
-    const rule = ruleset[permission]
-    if (!rule) return "ask"
-
-    let best: { length: number; action: Action } | undefined
-    for (const [p, action] of Object.entries(rule)) {
-      if (!Wildcard.match(pattern, p)) continue
-      if (!best || p.length > best.length) {
-        best = { length: p.length, action }
+    log.info("evaluate", { permission, pattern, ruleset })
+    for (const [permissionPattern, rule] of sortBy(Object.entries(ruleset), [([k]) => k.length, "desc"])) {
+      if (!Wildcard.match(permission, permissionPattern)) continue
+      for (const [p, action] of sortBy(Object.entries(rule), [([k]) => k.length, "desc"])) {
+        if (!Wildcard.match(pattern, p)) continue
+        return action
       }
     }
-
-    return best?.action ?? "ask"
+    return "ask"
   }
 
   export class RejectedError extends Error {

@@ -136,17 +136,14 @@ export namespace ToolRegistry {
   export async function enabled(agent: Agent.Info): Promise<Record<string, boolean>> {
     const result: Record<string, boolean> = {}
 
-    if (agent.permission.edit === "deny") {
-      result["edit"] = false
-      result["write"] = false
-    }
-    if (agent.permission.bash["*"] === "deny" && Object.keys(agent.permission.bash).length === 1) {
-      result["bash"] = false
-    }
-    if (agent.permission.webfetch === "deny") {
-      result["webfetch"] = false
-      result["codesearch"] = false
-      result["websearch"] = false
+    for (const [tool, action] of Object.entries(agent.permission)) {
+      if (!Bun.deepEquals(action, { "*": "deny" })) continue
+      result[tool] = false
+      if (tool === "edit") {
+        result["write"] = false
+        result["patch"] = false
+        result["multiedit"] = false
+      }
     }
 
     return result
