@@ -450,15 +450,18 @@ export type EventMessagePartRemoved = {
 export type PermissionRequest = {
   id: string
   sessionID: string
-  type: string
+  patterns: Array<string>
   title: string
   description: string
-  keys: Array<string>
-  patterns?: Array<string>
+  metadata: {
+    [key: string]: unknown
+  }
+  always: Array<string>
+  permission: string
 }
 
-export type EventPermissionRequest = {
-  type: "permission.request"
+export type EventPermissionRequested = {
+  type: "permission.requested"
   properties: PermissionRequest
 }
 
@@ -760,7 +763,7 @@ export type Event =
   | EventMessageRemoved
   | EventMessagePartUpdated
   | EventMessagePartRemoved
-  | EventPermissionRequest
+  | EventPermissionRequested
   | EventPermissionUpdated
   | EventPermissionReplied
   | EventFileEdited
@@ -1147,6 +1150,7 @@ export type PermissionConfig = {
   external_directory?: PermissionRuleConfig
   todowrite?: PermissionActionConfig
   todoread?: PermissionActionConfig
+  webfetch?: PermissionActionConfig
   websearch?: PermissionActionConfig
   codesearch?: PermissionActionConfig
   doom_loop?: PermissionActionConfig
@@ -1158,6 +1162,9 @@ export type AgentConfig = {
   temperature?: number
   top_p?: number
   prompt?: string
+  /**
+   * @deprecated Use 'permission' field instead
+   */
   tools?: {
     [key: string]: boolean
   }
@@ -1167,12 +1174,19 @@ export type AgentConfig = {
    */
   description?: string
   mode?: "subagent" | "primary" | "all"
+  options?: {
+    [key: string]: unknown
+  }
   /**
    * Hex color code for the agent (e.g., #FF5733)
    */
   color?: string
   /**
    * Maximum number of agentic iterations before forcing text-only response
+   */
+  steps?: number
+  /**
+   * @deprecated Use 'steps' field instead.
    */
   maxSteps?: number
   permission?: PermissionConfig
@@ -1187,6 +1201,9 @@ export type AgentConfig = {
     | "subagent"
     | "primary"
     | "all"
+    | {
+        [key: string]: unknown
+      }
     | string
     | number
     | PermissionConfig
