@@ -15,6 +15,7 @@ import { Config } from "@/config/config"
 import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
+import { Todo } from "./todo"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -397,6 +398,16 @@ export namespace SessionProcessor {
           if (needsCompaction) return "compact"
           if (blocked) return "stop"
           if (input.assistantMessage.error) return "stop"
+          const todos = await Todo.get(input.sessionID).catch(() => [])
+          const hasBlocking = todos.some((todo) => Todo.isBlockingStatus(todo.status))
+          if (
+            hasBlocking &&
+            input.assistantMessage.finish &&
+            !["tool-calls", "unknown"].includes(input.assistantMessage.finish)
+          ) {
+            input.assistantMessage.finish = "tool-calls"
+            await Session.updateMessage(input.assistantMessage)
+          }
           return "continue"
         }
       },

@@ -21,7 +21,7 @@ export const TodoWriteTool = Tool.define("todowrite", {
       todos: params.todos,
     })
     return {
-      title: `${params.todos.filter((x) => x.status !== "completed").length} todos`,
+      title: `${params.todos.filter((x) => Todo.isBlockingStatus(x.status)).length} todos`,
       output: JSON.stringify(params.todos, null, 2),
       metadata: {
         todos: params.todos,
@@ -43,7 +43,7 @@ export const TodoReadTool = Tool.define("todoread", {
 
     const todos = await Todo.get(ctx.sessionID)
     return {
-      title: `${todos.filter((x) => x.status !== "completed").length} todos`,
+      title: `${todos.filter((x) => Todo.isBlockingStatus(x.status)).length} todos`,
       metadata: {
         todos,
       },

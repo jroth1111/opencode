@@ -148,6 +148,8 @@ The assistant did not use the todo list because this is a single command executi
 1. **Task States**: Use these states to track progress:
    - pending: Task not yet started
    - in_progress: Currently working on (limit to ONE task at a time)
+   - blocked: Waiting on an external dependency or decision
+   - deferred: Intentionally paused for later (does not block completion)
    - completed: Task finished successfully
    - cancelled: Task no longer needed
 
@@ -164,4 +166,3 @@ The assistant did not use the todo list because this is a single command executi
    - Use clear, descriptive task names
 
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.
-

@@ -44,6 +44,7 @@ import { SessionStatus } from "./status"
 import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
+import { Todo } from "./todo"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1190,6 +1191,25 @@ export namespace SessionPrompt {
     const userMessage = input.messages.findLast((msg) => msg.info.role === "user")
     if (!userMessage) return input.messages
 
+    const appendTodoReminder = async () => {
+      const todos = await Todo.get(input.session.id).catch(() => [])
+      const blocking = todos.filter((todo) => Todo.isBlockingStatus(todo.status))
+      if (blocking.length === 0) return
+      const limit = 8
+      const visible = blocking.slice(0, limit)
+      const extra = blocking.length - visible.length
+      const lines = visible.map((todo) => `- [${todo.status}] ${todo.content}`)
+      if (extra > 0) lines.push(`- ...and ${extra} more`)
+      userMessage.parts.push({
+        id: Identifier.ascending("part"),
+        messageID: userMessage.info.id,
+        sessionID: userMessage.info.sessionID,
+        type: "text",
+        text: `<system-reminder>\nUnfinished session tasks remain:\n${lines.join("\n")}\nUpdate statuses with todowrite before finishing.\n</system-reminder>`,
+        synthetic: true,
+      })
+    }
+
     // Original logic when experimental plan mode is disabled
     if (!Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE) {
       if (input.agent.name === "plan") {
@@ -1213,6 +1233,7 @@ export namespace SessionPrompt {
           synthetic: true,
         })
       }
+      await appendTodoReminder()
       return input.messages
     }
 
@@ -1235,6 +1256,7 @@ export namespace SessionPrompt {
         })
         userMessage.parts.push(part)
       }
+      await appendTodoReminder()
       return input.messages
     }
 
@@ -1321,8 +1343,10 @@ NOTE: At any point in time through this workflow you should feel free to ask the
         synthetic: true,
       })
       userMessage.parts.push(part)
+      await appendTodoReminder()
       return input.messages
     }
+    await appendTodoReminder()
     return input.messages
   }
 
