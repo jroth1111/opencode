@@ -16,6 +16,7 @@ import { SessionCompaction } from "./compaction"
 import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
 import { Todo } from "./todo"
+import { Task } from "@/task"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -399,7 +400,7 @@ export namespace SessionProcessor {
           if (blocked) return "stop"
           if (input.assistantMessage.error) return "stop"
           const todos = await Todo.get(input.sessionID).catch(() => [])
-          const hasBlocking = todos.some((todo) => Todo.isBlockingStatus(todo.status))
+          const hasBlocking = todos.some((todo) => Task.isBlockingStatus(todo.status))
           if (
             hasBlocking &&
             input.assistantMessage.finish &&

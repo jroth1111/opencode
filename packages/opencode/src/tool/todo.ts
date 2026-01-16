@@ -2,11 +2,12 @@ import z from "zod"
 import { Tool } from "./tool"
 import DESCRIPTION_WRITE from "./todowrite.txt"
 import { Todo } from "../session/todo"
+import { Task } from "@/task"
 
 export const TodoWriteTool = Tool.define("todowrite", {
   description: DESCRIPTION_WRITE,
   parameters: z.object({
-    todos: z.array(z.object(Todo.Info.shape)).describe("The updated todo list"),
+    todos: z.array(z.object(Task.Info.shape)).describe("The updated task list"),
   }),
   async execute(params, ctx) {
     await ctx.ask({
@@ -21,7 +22,7 @@ export const TodoWriteTool = Tool.define("todowrite", {
       todos: params.todos,
     })
     return {
-      title: `${params.todos.filter((x) => Todo.isBlockingStatus(x.status)).length} todos`,
+      title: `${params.todos.filter((x) => Task.isBlockingStatus(x.status)).length} todos`,
       output: JSON.stringify(params.todos, null, 2),
       metadata: {
         todos: params.todos,
@@ -43,7 +44,7 @@ export const TodoReadTool = Tool.define("todoread", {
 
     const todos = await Todo.get(ctx.sessionID)
     return {
-      title: `${todos.filter((x) => Todo.isBlockingStatus(x.status)).length} todos`,
+      title: `${todos.filter((x) => Task.isBlockingStatus(x.status)).length} todos`,
       metadata: {
         todos,
       },

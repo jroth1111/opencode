@@ -4,31 +4,16 @@ import z from "zod"
 import { Storage } from "../storage/storage"
 import { Beads, type BeadsIssue } from "@/beads/client"
 import { Log } from "@/util/log"
+import { Task } from "@/task"
 
 export namespace Todo {
   const log = Log.create({ service: "session.todo" })
   const SESSION_LABEL_PREFIX = "opencode:session:"
   const TODO_LABEL_PREFIX = "opencode:todo:"
-  const STATUS_PENDING = "pending"
-  const STATUS_IN_PROGRESS = "in_progress"
-  const STATUS_BLOCKED = "blocked"
-  const STATUS_DEFERRED = "deferred"
-  const STATUS_COMPLETED = "completed"
-  const STATUS_CANCELLED = "cancelled"
+  const EXTERNAL_REF_PREFIX = "opencode:session:"
 
-  export const Info = z
-    .object({
-      content: z.string().describe("Brief description of the task"),
-      status: z
-        .string()
-        .describe(
-          "Current status of the task: pending, in_progress, blocked, deferred, completed, cancelled",
-        ),
-      priority: z.string().describe("Priority level of the task: high, medium, low"),
-      id: z.string().describe("Unique identifier for the todo item"),
-    })
-    .meta({ ref: "Todo" })
-  export type Info = z.infer<typeof Info>
+  export const Info = Task.Info
+  export type Info = Task.Info
 
   export const Event = {
     Updated: BusEvent.define(
@@ -38,14 +23,6 @@ export namespace Todo {
         todos: z.array(Info),
       }),
     ),
-  }
-
-  export function isBlockingStatus(status: string) {
-    return [STATUS_PENDING, STATUS_IN_PROGRESS, STATUS_BLOCKED].includes(status)
-  }
-
-  export function isDoneStatus(status: string) {
-    return [STATUS_COMPLETED, STATUS_CANCELLED, STATUS_DEFERRED].includes(status)
   }
 
   function encodeLabel(value: string) {
@@ -75,75 +52,14 @@ export namespace Todo {
     return decodeLabel(match.slice(TODO_LABEL_PREFIX.length))
   }
 
-  function normalizeStatus(status?: string): Info["status"] {
-    if (!status) return STATUS_PENDING
-    const value = status.trim().toLowerCase()
-    switch (value) {
-      case STATUS_PENDING:
-      case STATUS_IN_PROGRESS:
-      case STATUS_BLOCKED:
-      case STATUS_DEFERRED:
-      case STATUS_COMPLETED:
-      case STATUS_CANCELLED:
-        return value
-      default:
-        return STATUS_PENDING
-    }
-  }
-
-  function normalizePriority(priority?: string): Info["priority"] {
-    if (!priority) return "medium"
-    const value = priority.trim().toLowerCase()
-    if (value === "high" || value === "medium" || value === "low") return value
-    return "medium"
-  }
-
-  function toBeadsStatus(status?: string) {
-    switch (normalizeStatus(status)) {
-      case STATUS_PENDING:
-        return "open"
-      case STATUS_IN_PROGRESS:
-        return "in_progress"
-      case STATUS_BLOCKED:
-        return "blocked"
-      case STATUS_DEFERRED:
-        return "deferred"
-      case STATUS_COMPLETED:
-        return "closed"
-      case STATUS_CANCELLED:
-        return "deferred"
-      default:
-        return "open"
-    }
-  }
-
-  function toTodoStatus(status?: string): Info["status"] {
-    switch ((status ?? "").toLowerCase()) {
-      case "open":
-        return STATUS_PENDING
-      case "in_progress":
-        return STATUS_IN_PROGRESS
-      case "blocked":
-        return STATUS_BLOCKED
-      case "deferred":
-        return STATUS_DEFERRED
-      case "closed":
-        return STATUS_COMPLETED
-      case "tombstone":
-        return STATUS_CANCELLED
-      default:
-        return STATUS_PENDING
-    }
-  }
-
   function toBeadsPriority(priority?: string) {
-    const normalized = normalizePriority(priority)
+    const normalized = Task.normalizePriority(priority)
     if (normalized === "high") return 1
     if (normalized === "low") return 3
     return 2
   }
 
-  function toTodoPriority(priority?: number): Info["priority"] {
+  function toTodoPriority(priority?: number): Task.Priority {
     if (priority === undefined) return "medium"
     if (priority <= 1) return "high"
     if (priority === 2) return "medium"
@@ -151,22 +67,16 @@ export namespace Todo {
   }
 
   function normalizeTodo(todo: Info): Info {
-    return {
-      content: todo.content,
-      id: todo.id || todo.content,
-      status: normalizeStatus(todo.status),
-      priority: normalizePriority(todo.priority),
-    }
+    return Task.normalize(todo)
   }
 
   function sortTodos(a: Info, b: Info) {
     const order: Record<string, number> = {
-      [STATUS_IN_PROGRESS]: 0,
-      [STATUS_PENDING]: 1,
-      [STATUS_BLOCKED]: 2,
-      [STATUS_DEFERRED]: 3,
-      [STATUS_COMPLETED]: 4,
-      [STATUS_CANCELLED]: 5,
+      in_progress: 0,
+      open: 1,
+      blocked: 2,
+      deferred: 3,
+      closed: 4,
     }
     const rankA = order[a.status] ?? 9
     const rankB = order[b.status] ?? 9
@@ -184,13 +94,25 @@ export namespace Todo {
     })
   }
 
+  function externalRef(sessionID: string, todoID: string) {
+    return `${EXTERNAL_REF_PREFIX}${encodeLabel(sessionID)}:todo:${encodeLabel(todoID)}`
+  }
+
+  function extractTodoIDFromExternalRef(ref?: string | null) {
+    if (!ref || !ref.startsWith(EXTERNAL_REF_PREFIX)) return
+    const tail = ref.slice(EXTERNAL_REF_PREFIX.length)
+    const [rawSession, marker, rawTodo] = tail.split(":")
+    if (!rawSession || marker !== "todo" || !rawTodo) return
+    return decodeLabel(rawTodo)
+  }
+
   export async function update(input: { sessionID: string; todos: Info[] }) {
     const todos = input.todos.map(normalizeTodo)
     try {
       const existing = await listSessionIssues(input.sessionID)
       const existingByTodo = new Map<string, BeadsIssue>()
       for (const issue of existing) {
-        const todoID = extractTodoID(issue.labels)
+        const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
         if (todoID) existingByTodo.set(todoID, issue)
       }
 
@@ -199,13 +121,15 @@ export namespace Todo {
         const labelSession = sessionLabel(input.sessionID)
         const labelTodo = todoLabel(todo.id)
         const existingIssue = existingByTodo.get(todo.id)
+        const ref = externalRef(input.sessionID, todo.id)
         if (existingIssue) {
           await Beads.update({
             id: existingIssue.id,
             title: todo.content,
-            status: toBeadsStatus(todo.status),
+            status: Task.normalizeStatus(todo.status),
             priority: toBeadsPriority(todo.priority),
             add_labels: [labelSession, labelTodo],
+            external_ref: ref,
           })
         } else {
           await Beads.create({
@@ -214,13 +138,14 @@ export namespace Todo {
             priority: toBeadsPriority(todo.priority),
             labels: [labelSession, labelTodo],
             ephemeral: true,
+            external_ref: ref,
           })
         }
         seen.add(todo.id)
       }
 
       for (const issue of existing) {
-        const todoID = extractTodoID(issue.labels)
+        const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
         if (!todoID || seen.has(todoID)) continue
         if ((issue.status ?? "").toLowerCase() !== "closed") {
           await Beads.update({
@@ -241,9 +166,9 @@ export namespace Todo {
       const issues = await listSessionIssues(sessionID)
       const todos = issues
         .map((issue) => ({
-          id: extractTodoID(issue.labels) ?? issue.id,
+          id: extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref) ?? issue.id,
           content: issue.title,
-          status: toTodoStatus(issue.status),
+          status: Task.normalizeStatus(issue.status),
           priority: toTodoPriority(issue.priority),
         }))
         .map(normalizeTodo)

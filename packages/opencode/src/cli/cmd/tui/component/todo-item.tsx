@@ -7,10 +7,10 @@ export interface TodoItemProps {
 
 export function TodoItem(props: TodoItemProps) {
   const { theme } = useTheme()
-  const isCompleted = props.status === "completed"
+  const isCompleted = props.status === "closed"
   const isInProgress = props.status === "in_progress"
   const isBlocked = props.status === "blocked"
-  const isDeferred = props.status === "deferred" || props.status === "cancelled"
+  const isDeferred = props.status === "deferred"
   const indicator = isCompleted ? "✓" : isInProgress ? "•" : isBlocked ? "!" : isDeferred ? "-" : " "
   const indicatorColor = isBlocked
     ? theme.error

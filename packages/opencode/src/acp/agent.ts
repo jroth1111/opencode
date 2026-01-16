@@ -27,6 +27,7 @@ import { Installation } from "@/installation"
 import { MessageV2 } from "@/session/message-v2"
 import { Config } from "@/config/config"
 import { Todo } from "@/session/todo"
+import { Task } from "@/task"
 import { z } from "zod"
 import { LoadAPIKeyError } from "ai"
 import type { OpencodeClient, SessionMessageResponse } from "@opencode-ai/sdk/v2"
@@ -225,7 +226,7 @@ export namespace ACP {
                       }
 
                       if (part.tool === "todowrite") {
-                        const parsedTodos = z.array(Todo.Info).safeParse(JSON.parse(part.state.output))
+                        const parsedTodos = z.array(Task.Info).safeParse(JSON.parse(part.state.output))
                         if (parsedTodos.success) {
                           await this.connection
                             .sessionUpdate({
@@ -234,7 +235,11 @@ export namespace ACP {
                                 sessionUpdate: "plan",
                                 entries: parsedTodos.data.map((todo) => {
                                   const status: PlanEntry["status"] =
-                                    todo.status === "cancelled" ? "completed" : (todo.status as PlanEntry["status"])
+                                    todo.status === "closed"
+                                      ? "completed"
+                                      : todo.status === "in_progress"
+                                        ? "in_progress"
+                                        : "pending"
                                   return {
                                     priority: "medium",
                                     status,
@@ -555,7 +560,7 @@ export namespace ACP {
               }
 
               if (part.tool === "todowrite") {
-                const parsedTodos = z.array(Todo.Info).safeParse(JSON.parse(part.state.output))
+                const parsedTodos = z.array(Task.Info).safeParse(JSON.parse(part.state.output))
                 if (parsedTodos.success) {
                   await this.connection
                     .sessionUpdate({
@@ -564,7 +569,11 @@ export namespace ACP {
                         sessionUpdate: "plan",
                         entries: parsedTodos.data.map((todo) => {
                           const status: PlanEntry["status"] =
-                            todo.status === "cancelled" ? "completed" : (todo.status as PlanEntry["status"])
+                            todo.status === "closed"
+                              ? "completed"
+                              : todo.status === "in_progress"
+                                ? "in_progress"
+                                : "pending"
                           return {
                             priority: "medium",
                             status,

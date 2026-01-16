@@ -11,7 +11,7 @@ import { useKeybind } from "../../context/keybind"
 import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
-import { Todo } from "@/session/todo"
+import { Task } from "@/task"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -202,7 +202,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </For>
               </Show>
             </box>
-            <Show when={todo().length > 0 && todo().some((t) => Todo.isBlockingStatus(t.status))}>
+            <Show when={todo().length > 0 && todo().some((t) => Task.isBlockingStatus(t.status))}>
               <box>
                 <box
                   flexDirection="row"

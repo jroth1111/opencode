@@ -45,6 +45,7 @@ import { LLM } from "./llm"
 import { iife } from "@/util/iife"
 import { Shell } from "@/shell/shell"
 import { Todo } from "./todo"
+import { Task } from "@/task"
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
@@ -1193,7 +1194,7 @@ export namespace SessionPrompt {
 
     const appendTodoReminder = async () => {
       const todos = await Todo.get(input.session.id).catch(() => [])
-      const blocking = todos.filter((todo) => Todo.isBlockingStatus(todo.status))
+      const blocking = todos.filter((todo) => Task.isBlockingStatus(todo.status))
       if (blocking.length === 0) return
       const limit = 8
       const visible = blocking.slice(0, limit)
