@@ -838,6 +838,77 @@ export namespace Config {
     })
   export type Provider = z.infer<typeof Provider>
 
+  export const TaskRunConfig = z
+    .object({
+      max_children: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Default maximum number of child tasks a TaskRun may create"),
+      max_depth: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("Default recursion depth for TaskRun child creation"),
+      max_ops: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Default maximum number of scoped todo operations per TaskRun"),
+      cleanup_mode: z
+        .enum(["close", "archive"])
+        .optional()
+        .describe("Default cleanup behavior for failed TaskRuns"),
+      capability_secret: z
+        .string()
+        .optional()
+        .describe("Optional shared secret for signing capability tokens (default: generated per workspace)"),
+      token_ttl_ms: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe("Optional time-to-live for capability tokens in milliseconds"),
+      tool_usage: z
+        .enum(["high", "all", "none"])
+        .optional()
+        .describe(
+          "Tool usage tracking mode for TaskRuns. 'high' tracks only high-impact tools (default), 'all' tracks every tool, 'none' disables tracking.",
+        ),
+    })
+    .strict()
+    .meta({
+      ref: "TaskRunConfig",
+    })
+  export type TaskRunConfig = z.infer<typeof TaskRunConfig>
+
+  export const TaskConfig = z
+    .object({
+      repo_tracker: z
+        .enum(["beads", "json"])
+        .optional()
+        .describe("Repository todo tracker backend (default: beads)"),
+      repo_tracker_path: z
+        .string()
+        .optional()
+        .describe("Path for JSON repo todo tracker (relative paths resolve against project root)"),
+      session_wave_size: z
+        .number()
+        .int()
+        .nonnegative()
+        .optional()
+        .describe("Maximum number of blocking session todos to keep active (default: 3; 0 disables)"),
+      taskrun: TaskRunConfig.optional().describe("TaskRun defaults and cleanup behavior"),
+    })
+    .strict()
+    .meta({
+      ref: "TaskConfig",
+    })
+  export type TaskConfig = z.infer<typeof TaskConfig>
+
   export const Info = z
     .object({
       $schema: z.string().optional().describe("JSON schema reference for configuration validation"),
@@ -857,6 +928,7 @@ export namespace Config {
         .optional(),
       plugin: z.string().array().optional(),
       snapshot: z.boolean().optional(),
+      task: TaskConfig.optional().describe("Task tracking configuration"),
       share: z
         .enum(["manual", "auto", "disabled"])
         .optional()

@@ -173,4 +173,18 @@ The assistant did not use the todo list because this is a single command executi
    - Use `lane: "repo"` to store long-lived backlog items for the repository
    - Use `checkpoint: true` for tasks that require explicit user approval before closing
 
+6. **Optional Task Metadata**:
+   - `files`: list of related files to touch or verify (strongly recommended for non-trivial tasks)
+   - `action`: implementation approach or steps (strongly recommended for non-trivial tasks)
+   - `verify`: how to validate completion (tests, commands, checks) (required before closing)
+   - `done`: acceptance criteria for completion (required before closing)
+   - `dependsOn`: list of task IDs that must be completed first
+   - `blocks`: list of task IDs blocked by this task
+   - `parentId`: parent task ID for hierarchy/grouping
+   - For `dependsOn`, `blocks`, and `parentId`, use task `id` values from the list
+   - `assignee`: agent or user responsible for the task
+   - `estimateMinutes`: integer estimate of effort in minutes
+   - `issueType`: custom issue type (optional, defaults to "task")
+   - `tracker`: tracker metadata (optional; usually auto-filled)
+
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.

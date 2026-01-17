@@ -4,9 +4,35 @@ export const BeadsIssueSchema = z.object({
   id: z.string(),
   title: z.string(),
   description: z.string().optional(),
+  design: z.string().optional(),
+  acceptance_criteria: z.string().optional(),
+  notes: z.string().optional(),
   status: z.string().optional(),
   priority: z.number().int().optional(),
   issue_type: z.string().optional(),
+  assignee: z.string().optional(),
+  parent: z.string().optional(),
+  estimated_minutes: z.number().int().optional(),
+  dependencies: z
+    .array(
+      z.object({
+        id: z.string(),
+        dependency_type: z.string().optional(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
+  dependents: z
+    .array(
+      z.object({
+        id: z.string(),
+        dependency_type: z.string().optional(),
+        title: z.string().optional(),
+        status: z.string().optional(),
+      }),
+    )
+    .optional(),
   labels: z.array(z.string()).optional(),
   external_ref: z.string().nullable().optional(),
 })
@@ -53,9 +79,16 @@ export type BeadsReadyArgs = z.infer<typeof BeadsReadyArgsSchema>
 export const BeadsIssueInputSchema = z.object({
   title: z.string(),
   description: z.string().optional(),
+  design: z.string().optional(),
+  acceptance_criteria: z.string().optional(),
+  notes: z.string().optional(),
   issue_type: z.string().optional(),
   priority: z.number().int().optional(),
+  assignee: z.string().optional(),
   labels: z.array(z.string()).optional(),
+  dependencies: z.array(z.string()).optional(),
+  parent: z.string().optional(),
+  estimated_minutes: z.number().int().optional(),
   external_ref: z.string().optional(),
   ephemeral: z.boolean().optional(),
   status: z.string().optional(),
@@ -71,6 +104,11 @@ export const BeadsUpdateArgsSchema = z.object({
   description: z.string().optional(),
   status: z.string().optional(),
   priority: z.number().int().optional(),
+  design: z.string().optional(),
+  acceptance_criteria: z.string().optional(),
+  notes: z.string().optional(),
+  assignee: z.string().optional(),
+  estimated_minutes: z.number().int().optional(),
   issue_type: z.string().optional(),
   add_labels: z.array(z.string()).optional(),
   remove_labels: z.array(z.string()).optional(),
@@ -78,6 +116,20 @@ export const BeadsUpdateArgsSchema = z.object({
   external_ref: z.string().optional(),
 })
 export type BeadsUpdateArgs = z.infer<typeof BeadsUpdateArgsSchema>
+
+export const BeadsDepAddArgsSchema = z.object({
+  from_id: z.string(),
+  to_id: z.string(),
+  dep_type: z.string().optional(),
+})
+export type BeadsDepAddArgs = z.infer<typeof BeadsDepAddArgsSchema>
+
+export const BeadsDepRemoveArgsSchema = z.object({
+  from_id: z.string(),
+  to_id: z.string(),
+  dep_type: z.string().optional(),
+})
+export type BeadsDepRemoveArgs = z.infer<typeof BeadsDepRemoveArgsSchema>
 
 export const BeadsCloseArgsSchema = z.object({
   id: z.string(),

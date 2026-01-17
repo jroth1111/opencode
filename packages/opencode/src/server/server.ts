@@ -38,7 +38,10 @@ import { SessionCompaction } from "../session/compaction"
 import { SessionRevert } from "../session/revert"
 import { lazy } from "../util/lazy"
 import { Todo } from "../session/todo"
+import { TaskRun } from "../task/run"
+import { TaskMutation } from "../task/mutation"
 import { RepoTodo } from "../task/repo"
+import { TaskMetrics } from "../task/metrics"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { MCP } from "../mcp"
 import { Storage } from "../storage/storage"
@@ -907,11 +910,294 @@ export namespace Server {
               return c.json(todos)
             }
             if (lane === "ready") {
+              if (query.sessionID) {
+                const todos = await Todo.ready(query.sessionID)
+                return c.json(todos)
+              }
               const todos = await RepoTodo.ready({ agent: query.agent, limit: query.limit })
               return c.json(todos)
             }
             const todos = await RepoTodo.list({ agent: query.agent })
             return c.json(todos)
+          },
+        )
+        .get(
+          "/todo/:todoId",
+          describeRoute({
+            summary: "Get todo by id",
+            description: "Retrieve a single todo by id for the specified lane.",
+            operationId: "todo.get",
+            responses: {
+              200: {
+                description: "Todo",
+                content: {
+                  "application/json": {
+                    schema: resolver(Todo.Info),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              todoId: z.string().meta({ description: "Todo ID" }),
+            }),
+          ),
+          validator(
+            "query",
+            z
+              .object({
+                lane: z.enum(["session", "repo"]).optional(),
+                sessionID: z.string().optional(),
+                agent: z.string().optional(),
+              })
+              .refine((data) => (data.lane ?? "session") !== "session" || !!data.sessionID, {
+                message: "sessionID is required for session lane",
+                path: ["sessionID"],
+              }),
+          ),
+          async (c) => {
+            const { todoId } = c.req.valid("param")
+            const query = c.req.valid("query")
+            const lane = query.lane ?? "session"
+            if (lane === "session") {
+              const todo = await Todo.getById({ sessionID: query.sessionID!, todoId })
+              return c.json(todo)
+            }
+            const todo = await RepoTodo.getById({ todoId, agent: query.agent })
+            return c.json(todo)
+          },
+        )
+        .get(
+          "/todo/:todoId/metrics",
+          describeRoute({
+            summary: "Get todo metrics",
+            description: "Retrieve aggregated execution metrics, history, and runs for a todo.",
+            operationId: "todo.metrics",
+            responses: {
+              200: {
+                description: "Todo metrics",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.any()),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              todoId: z.string().meta({ description: "Todo ID" }),
+            }),
+          ),
+          validator(
+            "query",
+            z.object({
+              refresh: z.coerce.boolean().optional(),
+            }),
+          ),
+          async (c) => {
+            const { todoId } = c.req.valid("param")
+            const query = c.req.valid("query")
+            const metrics = await TaskMetrics.get(todoId, query.refresh ?? false)
+            return c.json(metrics)
+          },
+        )
+        .get(
+          "/todo/:todoId/children",
+          describeRoute({
+            summary: "Get todo children",
+            description: "Retrieve child todos for a specific parent.",
+            operationId: "todo.children",
+            responses: {
+              200: {
+                description: "Todo children",
+                content: {
+                  "application/json": {
+                    schema: resolver(Todo.Info.array()),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              todoId: z.string().meta({ description: "Parent todo ID" }),
+            }),
+          ),
+          validator(
+            "query",
+            z
+              .object({
+                lane: z.enum(["session", "repo"]).optional(),
+                sessionID: z.string().optional(),
+                agent: z.string().optional(),
+              })
+              .refine((data) => (data.lane ?? "session") !== "session" || !!data.sessionID, {
+                message: "sessionID is required for session lane",
+                path: ["sessionID"],
+              }),
+          ),
+          async (c) => {
+            const { todoId } = c.req.valid("param")
+            const query = c.req.valid("query")
+            const lane = query.lane ?? "session"
+            if (lane === "session") {
+              const todos = await Todo.listChildrenByParent({ sessionID: query.sessionID!, parentId: todoId })
+              return c.json(todos)
+            }
+            const todos = await RepoTodo.listChildrenByParent({ parentId: todoId, agent: query.agent })
+            return c.json(todos)
+          },
+        )
+        .get(
+          "/todo/:todoId/graph",
+          describeRoute({
+            summary: "Get todo graph",
+            description: "Retrieve a bounded task graph for a specific todo.",
+            operationId: "todo.graph",
+            responses: {
+              200: {
+                description: "Todo graph",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.any()),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              todoId: z.string().meta({ description: "Root todo ID" }),
+            }),
+          ),
+          validator(
+            "query",
+            z
+              .object({
+                lane: z.enum(["session", "repo"]).optional(),
+                sessionID: z.string().optional(),
+                agent: z.string().optional(),
+                depth: z.coerce.number().int().nonnegative().optional(),
+                limit: z.coerce.number().int().nonnegative().optional(),
+                include_parent: z.coerce.boolean().optional(),
+                include_deps: z.coerce.boolean().optional(),
+                include_children: z.coerce.boolean().optional(),
+              })
+              .refine((data) => (data.lane ?? "session") !== "session" || !!data.sessionID, {
+                message: "sessionID is required for session lane",
+                path: ["sessionID"],
+              }),
+          ),
+          async (c) => {
+            const { todoId } = c.req.valid("param")
+            const query = c.req.valid("query")
+            const lane = query.lane ?? "session"
+            const include = {
+              parent: query.include_parent,
+              deps: query.include_deps,
+              children: query.include_children,
+            }
+            if (lane === "session") {
+              const graph = await Todo.graph({
+                sessionID: query.sessionID!,
+                rootId: todoId,
+                depth: query.depth,
+                limit: query.limit,
+                include,
+              })
+              return c.json(graph)
+            }
+            const graph = await RepoTodo.graph({
+              sessionID: query.sessionID,
+              rootId: todoId,
+              agent: query.agent,
+              depth: query.depth,
+              limit: query.limit,
+              include,
+            })
+            return c.json(graph)
+          },
+        )
+        .get(
+          "/task-runs",
+          describeRoute({
+            summary: "List task runs",
+            description: "Retrieve TaskRun records by todoId or sessionId.",
+            operationId: "taskrun.list",
+            responses: {
+              200: {
+                description: "TaskRun list",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.array(z.any())),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "query",
+            z
+              .object({
+                todoId: z.string().optional(),
+                sessionId: z.string().optional(),
+              })
+              .refine((data) => !!data.todoId || !!data.sessionId, {
+                message: "todoId or sessionId is required",
+                path: ["todoId"],
+              }),
+          ),
+          async (c) => {
+            const query = c.req.valid("query")
+            if (query.todoId) {
+              const runs = await TaskRun.listByTodo(query.todoId)
+              return c.json(runs)
+            }
+            const runs = await TaskRun.listBySession(query.sessionId!)
+            return c.json(runs)
+          },
+        )
+        .get(
+          "/task-runs/:runId",
+          describeRoute({
+            summary: "Get task run",
+            description: "Retrieve a TaskRun with its mutation log.",
+            operationId: "taskrun.get",
+            responses: {
+              200: {
+                description: "TaskRun detail",
+                content: {
+                  "application/json": {
+                    schema: resolver(z.any()),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              runId: z.string().meta({ description: "TaskRun ID" }),
+            }),
+          ),
+          async (c) => {
+            const { runId } = c.req.valid("param")
+            const run = await TaskRun.get(runId)
+            if (!run) return c.notFound()
+            const mutations = await TaskMutation.list(runId)
+            return c.json({ run, mutations })
           },
         )
         .post(

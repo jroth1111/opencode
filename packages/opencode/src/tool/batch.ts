@@ -1,6 +1,8 @@
 import z from "zod"
 import { Tool } from "./tool"
 import DESCRIPTION from "./batch.txt"
+import { Config } from "@/config/config"
+import { recordToolUsageForSession, toolUsageModeFromConfig } from "@/task/tool-usage"
 
 const DISALLOWED = new Set(["batch"])
 const FILTERED_FROM_SUGGESTIONS = new Set(["invalid", "patch", ...DISALLOWED])
@@ -32,6 +34,8 @@ export const BatchTool = Tool.define("batch", async () => {
     async execute(params, ctx) {
       const { Session } = await import("../session")
       const { Identifier } = await import("../id/id")
+      const config = await Config.get()
+      const toolUsageMode = toolUsageModeFromConfig(config)
 
       const toolCalls = params.tool_calls.slice(0, 10)
       const discardedCalls = params.tool_calls.slice(10)
@@ -77,6 +81,13 @@ export const BatchTool = Tool.define("batch", async () => {
           })
 
           const result = await tool.execute(validatedParams, { ...ctx, callID: partID })
+          await recordToolUsageForSession({
+            sessionID: ctx.sessionID,
+            tool: call.tool,
+            args: validatedParams,
+            mode: toolUsageMode,
+            config,
+          }).catch(() => {})
 
           await Session.updatePart({
             id: partID,

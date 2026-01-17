@@ -13,6 +13,7 @@ import path from "path"
 import { Instance } from "@/project/instance"
 import { Storage } from "@/storage/storage"
 import { Bus } from "@/bus"
+import { TaskState } from "@/task/state"
 
 import { LLM } from "./llm"
 import { Agent } from "@/agent/agent"
@@ -107,6 +108,8 @@ export namespace SessionSummary {
       userMsg.summary.title = result
       await Session.updateMessage(userMsg)
     }
+
+    await updateTaskNotes({ messages })
   }
 
   export const diff = fn(
@@ -145,5 +148,102 @@ export namespace SessionSummary {
 
     if (from && to) return Snapshot.diffFull(from, to)
     return []
+  }
+
+  function collectNoteText(messages: MessageV2.WithParts[]) {
+    const chunks: string[] = []
+    for (const msg of messages) {
+      const role = msg.info.role.toUpperCase()
+      for (const part of msg.parts) {
+        if (part.type !== "text") continue
+        if (part.synthetic) continue
+        const text = part.text.trim()
+        if (!text) continue
+        chunks.push(`${role}: ${text}`)
+        if (chunks.join("\n").length > 12_000) break
+      }
+      if (chunks.join("\n").length > 12_000) break
+    }
+    return chunks.join("\n")
+  }
+
+  function extractNotesFromText(text: string) {
+    const decisions: string[] = []
+    const blockers: string[] = []
+    const seenDecisions = new Set<string>()
+    const seenBlockers = new Set<string>()
+
+    let mode: "decisions" | "blockers" | undefined
+    const lines = text.split(/\r?\n/)
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line) {
+        mode = undefined
+        continue
+      }
+
+      const heading = line.match(/^(decisions?|blockers?)\s*[:\-]?\s*(.*)$/i)
+      if (heading) {
+        mode = heading[1].toLowerCase().startsWith("decision") ? "decisions" : "blockers"
+        const rest = heading[2]?.trim()
+        if (rest) {
+          const target = mode === "decisions" ? decisions : blockers
+          const seen = mode === "decisions" ? seenDecisions : seenBlockers
+          if (!seen.has(rest)) {
+            seen.add(rest)
+            target.push(rest)
+          }
+        }
+        continue
+      }
+
+      const bullet = line.match(/^(?:[-*]|\d+[.)])\s+(.*)$/)
+      if (bullet && mode) {
+        const item = bullet[1].trim()
+        if (!item) continue
+        const target = mode === "decisions" ? decisions : blockers
+        const seen = mode === "decisions" ? seenDecisions : seenBlockers
+        if (!seen.has(item)) {
+          seen.add(item)
+          target.push(item)
+        }
+      }
+    }
+
+    return { decisions, blockers }
+  }
+
+  function mergeNotes(existing: string[] | undefined, incoming: string[]) {
+    const merged = existing ? [...existing] : []
+    const seen = new Set(merged)
+    for (const item of incoming) {
+      if (!item) continue
+      if (seen.has(item)) continue
+      seen.add(item)
+      merged.push(item)
+    }
+    return merged
+  }
+
+  async function updateTaskNotes(input: { messages: MessageV2.WithParts[] }) {
+    const text = collectNoteText(input.messages)
+    if (!text) return
+    const { decisions, blockers } = extractNotesFromText(text)
+    if (decisions.length === 0 && blockers.length === 0) return
+
+    const existing = await TaskState.get().catch(() => undefined)
+    const nextDecisions = mergeNotes(existing?.decisions, decisions)
+    const nextBlockers = mergeNotes(existing?.blockers, blockers)
+
+    const decisionsChanged =
+      (existing?.decisions?.length ?? 0) !== nextDecisions.length
+    const blockersChanged =
+      (existing?.blockers?.length ?? 0) !== nextBlockers.length
+    if (!decisionsChanged && !blockersChanged) return
+
+    await TaskState.updateNotes({
+      decisions: nextDecisions,
+      blockers: nextBlockers,
+    })
   }
 }

@@ -3,7 +3,9 @@ const SESSION_PREFIX = `${PREFIX}session:`
 const REPO_PREFIX = `${PREFIX}repo:`
 const TODO_PREFIX = `${PREFIX}todo:`
 const AGENT_PREFIX = `${PREFIX}agent:`
+const RUN_PREFIX = `${PREFIX}run:`
 const CHECKPOINT_LABEL = `${PREFIX}checkpoint`
+const ORPHANED_LABEL = `${PREFIX}orphaned`
 
 function encodeLabel(value: string) {
   return encodeURIComponent(value)
@@ -38,7 +40,9 @@ export const TaskLabels = {
     repo: REPO_PREFIX,
     todo: TODO_PREFIX,
     agent: AGENT_PREFIX,
+    run: RUN_PREFIX,
     checkpoint: CHECKPOINT_LABEL,
+    orphaned: ORPHANED_LABEL,
   },
   session(sessionID: string) {
     return buildLabel(SESSION_PREFIX, sessionID)
@@ -52,6 +56,13 @@ export const TaskLabels = {
   agent(agent?: string) {
     if (!agent) return
     return buildLabel(AGENT_PREFIX, agent)
+  },
+  run(runId?: string) {
+    if (!runId) return
+    return buildLabel(RUN_PREFIX, runId)
+  },
+  orphaned() {
+    return ORPHANED_LABEL
   },
   checkpoint() {
     return CHECKPOINT_LABEL
@@ -70,6 +81,9 @@ export const TaskLabels = {
   },
   extractAgent(labels?: string[]) {
     return extractLabelValue(AGENT_PREFIX, labels)
+  },
+  extractRunId(labels?: string[]) {
+    return extractLabelValue(RUN_PREFIX, labels)
   },
   isRepoLabel(labels?: string[]) {
     return !!TaskLabels.extractRepoID(labels)
@@ -109,4 +123,3 @@ export const TaskLabels = {
 export function uniqueLabels(labels: Array<string | undefined>) {
   return Array.from(new Set(labels.filter(Boolean) as string[]))
 }
-
