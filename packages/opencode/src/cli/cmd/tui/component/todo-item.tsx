@@ -11,7 +11,8 @@ export function TodoItem(props: TodoItemProps) {
   const isInProgress = props.status === "in_progress"
   const isBlocked = props.status === "blocked"
   const isDeferred = props.status === "deferred"
-  const indicator = isCompleted ? "✓" : isInProgress ? "•" : isBlocked ? "!" : isDeferred ? "-" : " "
+  const isDraft = props.status === "draft"
+  const indicator = isCompleted ? "✓" : isInProgress ? "•" : isBlocked ? "!" : isDeferred ? "-" : isDraft ? "~" : " "
   const indicatorColor = isBlocked
     ? theme.error
     : isInProgress

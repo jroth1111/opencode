@@ -5,6 +5,7 @@ import {
   formatPart,
   formatTranscript,
 } from "../../../src/cli/cmd/tui/util/transcript"
+import { formatTaskRunLine } from "../../../src/cli/cmd/tui/util/task-run"
 import type { AssistantMessage, Part, UserMessage } from "@opencode-ai/sdk/v2"
 
 describe("transcript", () => {
@@ -168,6 +169,29 @@ describe("transcript", () => {
       expect(result).toContain("**Error:**")
       expect(result).toContain("Command failed")
     })
+
+    test("formats todo tool part", () => {
+      const part: Part = {
+        id: "part_todo",
+        sessionID: "ses_123",
+        messageID: "msg_123",
+        type: "tool",
+        callID: "call_todo",
+        tool: "todo",
+        state: {
+          status: "completed",
+          input: { action: "update", id: "todo_1", patch: { status: "open" } },
+          output: '{"id":"todo_1","status":"open"}',
+          title: "Todo updated",
+          metadata: {},
+          time: { start: 1000, end: 1100 },
+        },
+      }
+      const result = formatPart(part, options)
+      expect(result).toContain("Tool: todo")
+      expect(result).toContain('"action": "update"')
+      expect(result).toContain('"status": "open"')
+    })
   })
 
   describe("formatMessage", () => {
@@ -292,6 +316,30 @@ describe("transcript", () => {
       expect(result).toContain("## Assistant\n\n")
       expect(result).not.toContain("Build")
       expect(result).not.toContain("claude-sonnet-4-20250514")
+    })
+  })
+
+  describe("formatTaskRunLine", () => {
+    test("formats task run history line", () => {
+      const result = formatTaskRunLine({
+        status: "completed",
+        startedAt: "2025-01-01T10:00:00Z",
+        summary: "Done",
+      })
+
+      expect(result).toBe("completed · 2025-01-01T10:00:00Z · Done")
+    })
+
+    test("includes budget counters when present", () => {
+      const result = formatTaskRunLine({
+        status: "running",
+        budgets: { maxChildren: 5, maxDepth: 2, maxOps: 10 },
+        counters: { childrenCreated: 2, depthRemaining: 1, opsUsed: 7 },
+      })
+
+      expect(result).toContain("ops 7/10")
+      expect(result).toContain("children 2/5")
+      expect(result).toContain("depth 1/2")
     })
   })
 })

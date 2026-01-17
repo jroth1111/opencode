@@ -94,6 +94,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const visibleTodos = createMemo(() => {
     const items = laneTodos()
     if (todoLane() === "session") return items.filter((item) => Task.isBlockingStatus(item.status))
+    if (todoLane() === "ready") return items.filter((item) => Task.normalizeStatus(item.status) !== "draft")
     return items
   })
 
