@@ -4,14 +4,14 @@ export namespace Task {
   export const Status = z.enum(["open", "in_progress", "blocked", "deferred", "closed"])
   export type Status = z.infer<typeof Status>
 
-  export const Priority = z.enum(["high", "medium", "low"])
+  export const Priority = z.number().int().min(0).max(4)
   export type Priority = z.infer<typeof Priority>
 
   export const Info = z
     .object({
       content: z.string().describe("Brief description of the task"),
       status: Status.describe("Current status of the task: open, in_progress, blocked, deferred, closed"),
-      priority: Priority.describe("Priority level of the task: high, medium, low"),
+      priority: Priority.describe("Priority level of the task: 0 (P0) - 4 (P4)"),
       id: z.string().describe("Unique identifier for the task"),
     })
     .meta({ ref: "Task" })
@@ -31,6 +31,7 @@ export namespace Task {
         return "open"
       case "completed":
         return "closed"
+      case "canceled":
       case "cancelled":
         return "deferred"
       default:
@@ -38,11 +39,35 @@ export namespace Task {
     }
   }
 
-  export function normalizePriority(priority?: string): Priority {
-    if (!priority) return "medium"
+  export function normalizePriority(priority?: number | string | null): Priority {
+    if (priority === undefined || priority === null) return 2
+    if (typeof priority === "number") {
+      if (Number.isNaN(priority)) return 2
+      return Math.min(4, Math.max(0, Math.round(priority)))
+    }
     const value = priority.trim().toLowerCase()
-    if (value === "high" || value === "medium" || value === "low") return value
-    return "medium"
+    if (/^p?\d$/.test(value)) {
+      const numeric = Number(value.replace("p", ""))
+      if (!Number.isNaN(numeric)) {
+        return Math.min(4, Math.max(0, Math.round(numeric)))
+      }
+    }
+    switch (value) {
+      case "critical":
+      case "urgent":
+      case "highest":
+        return 0
+      case "high":
+        return 1
+      case "medium":
+        return 2
+      case "low":
+        return 3
+      case "lowest":
+        return 4
+      default:
+        return 2
+    }
   }
 
   export function isBlockingStatus(status: string) {
@@ -60,5 +85,16 @@ export namespace Task {
       status: normalizeStatus(task.status),
       priority: normalizePriority(task.priority),
     }
+  }
+
+  export function formatPriority(priority: Priority) {
+    return `P${normalizePriority(priority)}`
+  }
+
+  export function toPlanPriority(priority: Priority): "high" | "medium" | "low" {
+    const normalized = normalizePriority(priority)
+    if (normalized <= 1) return "high"
+    if (normalized === 2) return "medium"
+    return "low"
   }
 }

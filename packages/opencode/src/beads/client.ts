@@ -1,84 +1,26 @@
 import net from "net"
 import path from "path"
 import { randomUUID } from "crypto"
+import z from "zod"
 import { Log } from "@/util/log"
 import { Filesystem } from "@/util/filesystem"
 import { Instance } from "@/project/instance"
-
-export interface BeadsIssue {
-  id: string
-  title: string
-  status?: string
-  priority?: number
-  issue_type?: string
-  labels?: string[]
-  external_ref?: string | null
-}
-
-export interface BeadsIssueWithCounts {
-  issue: BeadsIssue
-  dependency_count?: number
-  dependent_count?: number
-}
-
-export interface BeadsListArgs {
-  query?: string
-  status?: string
-  issue_type?: string
-  assignee?: string
-  labels?: string[]
-  labels_any?: string[]
-  ids?: string[]
-  limit?: number
-  include_templates?: boolean
-  parent_id?: string
-  ephemeral?: boolean
-  exclude_status?: string[]
-}
-
-export interface BeadsCreateArgs {
-  title: string
-  description?: string
-  issue_type?: string
-  priority?: number
-  labels?: string[]
-  external_ref?: string
-  ephemeral?: boolean
-}
-
-export interface BeadsUpdateArgs {
-  id: string
-  title?: string
-  description?: string
-  status?: string
-  priority?: number
-  issue_type?: string
-  add_labels?: string[]
-  remove_labels?: string[]
-  set_labels?: string[]
-  external_ref?: string
-}
-
-export interface BeadsCloseArgs {
-  id: string
-  reason?: string
-  session?: string
-}
-
-interface RpcRequest {
-  operation: string
-  args: unknown
-  cwd?: string
-  request_id?: string
-  client_version?: string
-  expected_db?: string
-}
-
-interface RpcResponse {
-  success: boolean
-  data?: unknown
-  error?: string
-}
+import {
+  BeadsIssueSchema,
+  BeadsIssueWithCountsSchema,
+  BeadsListArgsSchema,
+  BeadsCreateArgsSchema,
+  BeadsUpdateArgsSchema,
+  BeadsCloseArgsSchema,
+  RpcRequestSchema,
+  RpcResponseSchema,
+  type BeadsIssue,
+  type BeadsIssueWithCounts,
+  type BeadsListArgs,
+  type BeadsCreateArgs,
+  type BeadsUpdateArgs,
+  type BeadsCloseArgs,
+} from "@/beads/protocol"
 
 const log = Log.create({ service: "beads.client" })
 const SOCKET_RELATIVE_PATH = path.join(".beads", "bd.sock")
@@ -93,20 +35,28 @@ async function findSocketPath(start: string) {
   return socketPath
 }
 
-async function rpcRequest<T>(operation: string, args: unknown, cwd: string): Promise<T> {
+function parseSchema<T>(schema: z.ZodType<T>, data: unknown, context: string): T {
+  const parsed = schema.safeParse(data)
+  if (!parsed.success) {
+    throw new Error(`beads ${context} response invalid: ${parsed.error.message}`)
+  }
+  return parsed.data
+}
+
+async function rpcRequest(operation: string, args: unknown, cwd: string): Promise<unknown> {
   if (rpcUnavailable.get(cwd)) throw new Error("beads rpc unavailable")
   const socketPath = await findSocketPath(cwd)
   if (!socketPath) throw new Error("beads rpc socket not found")
 
-  const request: RpcRequest = {
+  const request = RpcRequestSchema.parse({
     operation,
     args,
     cwd,
     request_id: randomUUID(),
     client_version: "opencode",
-  }
+  })
 
-  const response = await new Promise<RpcResponse>((resolve, reject) => {
+  const response = await new Promise<unknown>((resolve, reject) => {
     const conn = net.createConnection(socketPath)
     const chunks: Buffer[] = []
     let resolved = false
@@ -125,7 +75,12 @@ async function rpcRequest<T>(operation: string, args: unknown, cwd: string): Pro
       resolved = true
       conn.end()
       try {
-        resolve(JSON.parse(line) as RpcResponse)
+        const parsed = parseSchema(RpcResponseSchema, JSON.parse(line), "rpc")
+        if (!parsed.success) {
+          reject(new Error(parsed.error || "beads rpc error"))
+          return
+        }
+        resolve(parsed.data)
       } catch (error) {
         reject(error)
       }
@@ -137,14 +92,10 @@ async function rpcRequest<T>(operation: string, args: unknown, cwd: string): Pro
     })
   })
 
-  if (!response.success) {
-    throw new Error(response.error || "beads rpc error")
-  }
-
-  return response.data as T
+  return response
 }
 
-async function cliRequest<T>(args: string[], cwd: string): Promise<T> {
+async function cliRequest(args: string[], cwd: string): Promise<unknown> {
   const bd = Bun.which("bd")
   if (!bd) throw new Error("bd not found")
   const proc = Bun.spawn([bd, ...args, "--json"], {
@@ -162,16 +113,27 @@ async function cliRequest<T>(args: string[], cwd: string): Promise<T> {
   }
   const output = stdout.trim()
   if (!output) throw new Error("bd returned empty response")
-  return JSON.parse(output) as T
+  return JSON.parse(output) as unknown
 }
 
-async function request<T>(operation: string, args: unknown, cwd: string, cli: string[]): Promise<T> {
+async function request<T>(
+  operation: string,
+  args: unknown,
+  cwd: string,
+  cli: string[],
+  schema: z.ZodType<T>,
+): Promise<T> {
+  const data = await requestRaw(operation, args, cwd, cli)
+  return parseSchema(schema, data, operation)
+}
+
+async function requestRaw(operation: string, args: unknown, cwd: string, cli: string[]): Promise<unknown> {
   try {
-    return await rpcRequest<T>(operation, args, cwd)
+    return await rpcRequest(operation, args, cwd)
   } catch (error) {
     rpcUnavailable.set(cwd, true)
     log.warn("rpc fallback to cli", { error })
-    return cliRequest<T>(cli, cwd)
+    return cliRequest(cli, cwd)
   }
 }
 
@@ -182,24 +144,26 @@ function cwdFromInstance() {
 export const Beads = {
   async list(args: BeadsListArgs): Promise<BeadsIssue[]> {
     const cwd = cwdFromInstance()
+    const listArgs = BeadsListArgsSchema.parse({
+      query: args.query,
+      status: args.status,
+      issue_type: args.issue_type,
+      assignee: args.assignee,
+      labels: args.labels,
+      labels_any: args.labels_any,
+      ids: args.ids,
+      limit: args.limit ?? 0,
+      include_templates: args.include_templates ?? false,
+      parent_id: args.parent_id,
+      ephemeral: args.ephemeral,
+      exclude_status: args.exclude_status,
+    })
     const data = await request<BeadsIssueWithCounts[]>(
       "list",
-      {
-        query: args.query,
-        status: args.status,
-        issue_type: args.issue_type,
-        assignee: args.assignee,
-        labels: args.labels,
-        labels_any: args.labels_any,
-        ids: args.ids,
-        limit: args.limit ?? 0,
-        include_templates: args.include_templates ?? false,
-        parent_id: args.parent_id,
-        ephemeral: args.ephemeral,
-        exclude_status: args.exclude_status,
-      },
+      listArgs,
       cwd,
-      buildListArgs(args),
+      buildListArgs(listArgs),
+      z.array(BeadsIssueWithCountsSchema),
     )
 
     return data.map((item) => item.issue)
@@ -207,54 +171,61 @@ export const Beads = {
 
   async create(args: BeadsCreateArgs): Promise<BeadsIssue> {
     const cwd = cwdFromInstance()
+    const createArgs = BeadsCreateArgsSchema.parse({
+      title: args.title,
+      description: args.description,
+      issue_type: args.issue_type ?? "task",
+      priority: args.priority ?? 2,
+      labels: args.labels,
+      external_ref: args.external_ref,
+      ephemeral: args.ephemeral ?? false,
+      status: args.status,
+    })
     return request<BeadsIssue>(
       "create",
-      {
-        title: args.title,
-        description: args.description,
-        issue_type: args.issue_type ?? "task",
-        priority: args.priority ?? 2,
-        labels: args.labels,
-        external_ref: args.external_ref,
-        ephemeral: args.ephemeral ?? false,
-      },
+      createArgs,
       cwd,
-      buildCreateArgs(args),
+      buildCreateArgs(createArgs),
+      BeadsIssueSchema,
     )
   },
 
   async update(args: BeadsUpdateArgs): Promise<BeadsIssue> {
     const cwd = cwdFromInstance()
+    const updateArgs = BeadsUpdateArgsSchema.parse({
+      id: args.id,
+      title: args.title,
+      description: args.description,
+      status: args.status,
+      priority: args.priority,
+      issue_type: args.issue_type,
+      add_labels: args.add_labels,
+      remove_labels: args.remove_labels,
+      set_labels: args.set_labels,
+      external_ref: args.external_ref,
+    })
     return request<BeadsIssue>(
       "update",
-      {
-        id: args.id,
-        title: args.title,
-        description: args.description,
-        status: args.status,
-        priority: args.priority,
-        issue_type: args.issue_type,
-        add_labels: args.add_labels,
-        remove_labels: args.remove_labels,
-        set_labels: args.set_labels,
-        external_ref: args.external_ref,
-      },
+      updateArgs,
       cwd,
-      buildUpdateArgs(args),
+      buildUpdateArgs(updateArgs),
+      BeadsIssueSchema,
     )
   },
 
   async close(args: BeadsCloseArgs): Promise<BeadsIssue> {
     const cwd = cwdFromInstance()
+    const closeArgs = BeadsCloseArgsSchema.parse({
+      id: args.id,
+      reason: args.reason,
+      session: args.session,
+    })
     return request<BeadsIssue>(
       "close",
-      {
-        id: args.id,
-        reason: args.reason,
-        session: args.session,
-      },
+      closeArgs,
       cwd,
-      buildCloseArgs(args),
+      buildCloseArgs(closeArgs),
+      BeadsIssueSchema,
     )
   },
 }
@@ -283,6 +254,9 @@ function buildCreateArgs(args: BeadsCreateArgs) {
   const cliArgs = ["create", args.title]
   cliArgs.push("--type", args.issue_type ?? "task")
   cliArgs.push("--priority", String(args.priority ?? 2))
+  if (args.status) {
+    cliArgs.push("--status", args.status)
+  }
   if (args.labels && args.labels.length > 0) {
     cliArgs.push("--labels", args.labels.join(","))
   }

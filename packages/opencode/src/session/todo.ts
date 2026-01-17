@@ -1,15 +1,15 @@
 import { BusEvent } from "@/bus/bus-event"
 import { Bus } from "@/bus"
 import z from "zod"
-import { Storage } from "../storage/storage"
-import { Beads, type BeadsIssue } from "@/beads/client"
-import { Log } from "@/util/log"
+import { Beads } from "@/beads/client"
 import { Task } from "@/task"
+import { beadsIssueToTask, taskToBeadsIssue, taskToUI, uiToTask } from "@/task/adapters"
+import type { BeadsIssue } from "@/beads/protocol"
 
 export namespace Todo {
-  const log = Log.create({ service: "session.todo" })
   const SESSION_LABEL_PREFIX = "opencode:session:"
   const TODO_LABEL_PREFIX = "opencode:todo:"
+  const AGENT_LABEL_PREFIX = "opencode:agent:"
   const EXTERNAL_REF_PREFIX = "opencode:session:"
 
   export const Info = Task.Info
@@ -45,6 +45,11 @@ export namespace Todo {
     return `${TODO_LABEL_PREFIX}${encodeLabel(todoID)}`
   }
 
+  function agentLabel(agent?: string) {
+    if (!agent) return
+    return `${AGENT_LABEL_PREFIX}${encodeLabel(agent)}`
+  }
+
   function extractTodoID(labels?: string[]) {
     if (!labels) return
     const match = labels.find((label) => label.startsWith(TODO_LABEL_PREFIX))
@@ -52,22 +57,8 @@ export namespace Todo {
     return decodeLabel(match.slice(TODO_LABEL_PREFIX.length))
   }
 
-  function toBeadsPriority(priority?: string) {
-    const normalized = Task.normalizePriority(priority)
-    if (normalized === "high") return 1
-    if (normalized === "low") return 3
-    return 2
-  }
-
-  function toTodoPriority(priority?: number): Task.Priority {
-    if (priority === undefined) return "medium"
-    if (priority <= 1) return "high"
-    if (priority === 2) return "medium"
-    return "low"
-  }
-
   function normalizeTodo(todo: Info): Info {
-    return Task.normalize(todo)
+    return uiToTask(todo)
   }
 
   function sortTodos(a: Info, b: Info) {
@@ -106,79 +97,68 @@ export namespace Todo {
     return decodeLabel(rawTodo)
   }
 
-  export async function update(input: { sessionID: string; todos: Info[] }) {
+  export async function update(input: { sessionID: string; todos: Info[]; agent?: string }) {
     const todos = input.todos.map(normalizeTodo)
-    try {
-      const existing = await listSessionIssues(input.sessionID)
-      const existingByTodo = new Map<string, BeadsIssue>()
-      for (const issue of existing) {
-        const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
-        if (todoID) existingByTodo.set(todoID, issue)
-      }
-
-      const seen = new Set<string>()
-      for (const todo of todos) {
-        const labelSession = sessionLabel(input.sessionID)
-        const labelTodo = todoLabel(todo.id)
-        const existingIssue = existingByTodo.get(todo.id)
-        const ref = externalRef(input.sessionID, todo.id)
-        if (existingIssue) {
-          await Beads.update({
-            id: existingIssue.id,
-            title: todo.content,
-            status: Task.normalizeStatus(todo.status),
-            priority: toBeadsPriority(todo.priority),
-            add_labels: [labelSession, labelTodo],
-            external_ref: ref,
-          })
-        } else {
-          await Beads.create({
-            title: todo.content,
-            issue_type: "task",
-            priority: toBeadsPriority(todo.priority),
-            labels: [labelSession, labelTodo],
-            ephemeral: true,
-            external_ref: ref,
-          })
-        }
-        seen.add(todo.id)
-      }
-
-      for (const issue of existing) {
-        const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
-        if (!todoID || seen.has(todoID)) continue
-        if ((issue.status ?? "").toLowerCase() !== "closed") {
-          await Beads.update({
-            id: issue.id,
-            status: "closed",
-          })
-        }
-      }
-    } catch (error) {
-      log.warn("beads update failed, falling back to storage", { error })
-      await Storage.write(["todo", input.sessionID], todos)
+    const existing = await listSessionIssues(input.sessionID)
+    const existingByTodo = new Map<string, BeadsIssue>()
+    for (const issue of existing) {
+      const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
+      if (todoID) existingByTodo.set(todoID, issue)
     }
+
+    const seen = new Set<string>()
+    const labelSession = sessionLabel(input.sessionID)
+    const labelAgent = agentLabel(input.agent)
+    for (const todo of todos) {
+      const labelTodo = todoLabel(todo.id)
+      const existingIssue = existingByTodo.get(todo.id)
+      const ref = externalRef(input.sessionID, todo.id)
+      const base = taskToBeadsIssue(todo, { sessionID: input.sessionID, agent: input.agent, externalRef: ref })
+      const labels = [labelSession, labelTodo, ...(labelAgent ? [labelAgent] : [])]
+      const removeLabels =
+        labelAgent && existingIssue?.labels
+          ? existingIssue.labels.filter((label) => label.startsWith(AGENT_LABEL_PREFIX) && label !== labelAgent)
+          : undefined
+
+      if (existingIssue) {
+        await Beads.update({
+          id: existingIssue.id,
+          ...base,
+          add_labels: labels,
+          remove_labels: removeLabels,
+        })
+      } else {
+        await Beads.create({
+          ...base,
+          labels,
+          ephemeral: true,
+        })
+      }
+      seen.add(todo.id)
+    }
+
+    for (const issue of existing) {
+      const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
+      if (!todoID || seen.has(todoID)) continue
+      if (Task.normalizeStatus(issue.status) !== "closed") {
+        await Beads.update({
+          id: issue.id,
+          status: "closed",
+        })
+      }
+    }
+
     Bus.publish(Event.Updated, { sessionID: input.sessionID, todos })
   }
 
   export async function get(sessionID: string) {
-    try {
-      const issues = await listSessionIssues(sessionID)
-      const todos = issues
-        .map((issue) => ({
-          id: extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref) ?? issue.id,
-          content: issue.title,
-          status: Task.normalizeStatus(issue.status),
-          priority: toTodoPriority(issue.priority),
-        }))
-        .map(normalizeTodo)
-        .sort(sortTodos)
-      return todos
-    } catch (error) {
-      log.warn("beads read failed, falling back to storage", { error })
-      return Storage.read<Info[]>(["todo", sessionID])
-        .then((x) => x || [])
-        .catch(() => [])
-    }
+    const issues = await listSessionIssues(sessionID)
+    const todos = issues
+      .map((issue) => {
+        const todoID = extractTodoID(issue.labels) ?? extractTodoIDFromExternalRef(issue.external_ref)
+        return taskToUI(beadsIssueToTask(issue, { id: todoID }))
+      })
+      .sort(sortTodos)
+    return todos
   }
 }

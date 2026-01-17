@@ -241,7 +241,7 @@ export namespace ACP {
                                         ? "in_progress"
                                         : "pending"
                                   return {
-                                    priority: "medium",
+                                    priority: Task.toPlanPriority(todo.priority),
                                     status,
                                     content: todo.content,
                                   }
@@ -575,7 +575,7 @@ export namespace ACP {
                                 ? "in_progress"
                                 : "pending"
                           return {
-                            priority: "medium",
+                            priority: Task.toPlanPriority(todo.priority),
                             status,
                             content: todo.content,
                           }

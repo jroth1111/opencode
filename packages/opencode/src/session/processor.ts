@@ -399,7 +399,7 @@ export namespace SessionProcessor {
           if (needsCompaction) return "compact"
           if (blocked) return "stop"
           if (input.assistantMessage.error) return "stop"
-          const todos = await Todo.get(input.sessionID).catch(() => [])
+          const todos = await Todo.get(input.sessionID)
           const hasBlocking = todos.some((todo) => Task.isBlockingStatus(todo.status))
           if (
             hasBlocking &&

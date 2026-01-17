@@ -19,6 +19,7 @@ export const TodoWriteTool = Tool.define("todowrite", {
 
     await Todo.update({
       sessionID: ctx.sessionID,
+      agent: ctx.agent,
       todos: params.todos,
     })
     return {

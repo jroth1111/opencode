@@ -157,11 +157,15 @@ The assistant did not use the todo list because this is a single command executi
    - Mark tasks complete IMMEDIATELY after finishing (don't batch completions)
    - Only have ONE task in_progress at any time
    - Complete current tasks before starting new ones
-   - Cancel tasks that become irrelevant
+   - Defer tasks that become irrelevant or non-urgent
 
 3. **Task Breakdown**:
    - Create specific, actionable items
    - Break complex tasks into smaller, manageable steps
    - Use clear, descriptive task names
+
+4. **Priority**:
+   - Use numeric priority from 0 (P0, highest) to 4 (P4, lowest)
+   - Default to 2 (P2) unless there's a strong reason to raise or lower it
 
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.

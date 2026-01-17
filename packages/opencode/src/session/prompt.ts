@@ -1193,7 +1193,7 @@ export namespace SessionPrompt {
     if (!userMessage) return input.messages
 
     const appendTodoReminder = async () => {
-      const todos = await Todo.get(input.session.id).catch(() => [])
+      const todos = await Todo.get(input.session.id)
       const blocking = todos.filter((todo) => Task.isBlockingStatus(todo.status))
       if (blocking.length === 0) return
       const limit = 8
