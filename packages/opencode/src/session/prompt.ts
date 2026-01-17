@@ -38,6 +38,7 @@ import { NamedError } from "@opencode-ai/util/error"
 import { fn } from "@/util/fn"
 import { SessionProcessor } from "./processor"
 import { TaskTool } from "@/tool/task"
+import { FinishTool } from "@/tool/finish"
 import { Tool } from "@/tool/tool"
 import { PermissionNext } from "@/permission/next"
 import { SessionStatus } from "./status"
@@ -54,6 +55,7 @@ import {
   PlanRequiredError,
   VerifyRequiredError,
   evaluateNudge,
+  isFinishIntent,
   isKickoffComplete,
   isVerificationCommand,
   mergeState,
@@ -72,6 +74,18 @@ globalThis.AI_SDK_LOG_WARNINGS = false
 export namespace SessionPrompt {
   const log = Log.create({ service: "session.prompt" })
   export const OUTPUT_TOKEN_MAX = Flag.OPENCODE_EXPERIMENTAL_OUTPUT_TOKEN_MAX || 32_000
+
+  function getUserText(parts: MessageV2.Part[]): string {
+    return parts
+      .filter((part) => part.type === "text" && !(part as MessageV2.TextPart).synthetic)
+      .map((part) => (part as MessageV2.TextPart).text)
+      .join("\n")
+      .trim()
+  }
+
+  function hasNonTextUserParts(parts: MessageV2.Part[]): boolean {
+    return parts.some((part) => part.type !== "text" && !(part as MessageV2.Part & { synthetic?: boolean }).synthetic)
+  }
 
   const state = Instance.state(
     () => {
@@ -531,6 +545,199 @@ export namespace SessionPrompt {
           model: lastUser.model,
           auto: true,
         })
+        continue
+      }
+
+      const lastUserMsg = msgs.findLast((msg) => msg.info.id === lastUser.id)
+      const finishText = lastUserMsg ? getUserText(lastUserMsg.parts) : ""
+      const finishIntent = !!lastUserMsg && !hasNonTextUserParts(lastUserMsg.parts) && isFinishIntent(finishText)
+      if (finishIntent) {
+        const workflowConfig = await resolveConfig()
+        const workflowState = mergeState(session.workflow, workflowConfig)
+        const mode = workflowState.mode ?? workflowConfig.mode
+
+        if (mode === "workflow") {
+          const finishTool = await FinishTool.init()
+          const assistantMessage = (await Session.updateMessage({
+            id: Identifier.ascending("message"),
+            role: "assistant",
+            parentID: lastUser.id,
+            sessionID,
+            mode: lastUser.agent,
+            agent: lastUser.agent,
+            path: {
+              cwd: Instance.directory,
+              root: Instance.worktree,
+            },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: model.id,
+            providerID: model.providerID,
+            time: {
+              created: Date.now(),
+            },
+          })) as MessageV2.Assistant
+
+          let part = (await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: assistantMessage.id,
+            sessionID: assistantMessage.sessionID,
+            type: "tool",
+            callID: ulid(),
+            tool: FinishTool.id,
+            state: {
+              status: "running",
+              input: {},
+              time: {
+                start: Date.now(),
+              },
+            },
+          })) as MessageV2.ToolPart
+
+          await Plugin.trigger(
+            "tool.execute.before",
+            {
+              tool: FinishTool.id,
+              sessionID,
+              callID: part.id,
+            },
+            { args: {} },
+          )
+
+          let executionError: Error | undefined
+          const finishCtx: Tool.Context = {
+            agent: lastUser.agent,
+            messageID: assistantMessage.id,
+            sessionID,
+            abort,
+            callID: part.callID,
+            extra: { bypassAgentCheck: true },
+            async metadata(input) {
+              await Session.updatePart({
+                ...part,
+                type: "tool",
+                state: {
+                  ...part.state,
+                  ...input,
+                },
+              } satisfies MessageV2.ToolPart)
+            },
+            async ask(req) {
+              await PermissionNext.ask({
+                ...req,
+                sessionID,
+                ruleset: PermissionNext.merge((await Agent.get(lastUser.agent))?.permission ?? [], session.permission ?? []),
+              })
+            },
+          }
+
+          const result = await finishTool.execute({}, finishCtx).catch((error) => {
+            executionError = error
+            log.error("finish gate failed", { error })
+            return undefined
+          })
+
+          if (result) {
+            await recordToolUsageForSession({
+              sessionID,
+              tool: FinishTool.id,
+              args: {},
+            }).catch(() => {})
+          }
+
+          await Plugin.trigger(
+            "tool.execute.after",
+            {
+              tool: FinishTool.id,
+              sessionID,
+              callID: part.id,
+            },
+            result,
+          )
+
+          assistantMessage.finish = "stop"
+          assistantMessage.time.completed = Date.now()
+          await Session.updateMessage(assistantMessage)
+
+          if (result && part.state.status === "running") {
+            await Session.updatePart({
+              ...part,
+              state: {
+                status: "completed",
+                input: part.state.input,
+                title: result.title,
+                metadata: result.metadata,
+                output: result.output,
+                attachments: result.attachments,
+                time: {
+                  ...part.state.time,
+                  end: Date.now(),
+                },
+              },
+            } satisfies MessageV2.ToolPart)
+          }
+          if (!result) {
+            await Session.updatePart({
+              ...part,
+              state: {
+                status: "error",
+                input: part.state.input,
+                error: executionError?.message ?? "Finish gate failed",
+                time: {
+                  ...part.state.time,
+                  end: Date.now(),
+                },
+              },
+            } satisfies MessageV2.ToolPart)
+          }
+        } else {
+          const assistantMessage = (await Session.updateMessage({
+            id: Identifier.ascending("message"),
+            role: "assistant",
+            parentID: lastUser.id,
+            sessionID,
+            mode: lastUser.agent,
+            agent: lastUser.agent,
+            path: {
+              cwd: Instance.directory,
+              root: Instance.worktree,
+            },
+            cost: 0,
+            tokens: {
+              input: 0,
+              output: 0,
+              reasoning: 0,
+              cache: { read: 0, write: 0 },
+            },
+            modelID: model.id,
+            providerID: model.providerID,
+            time: {
+              created: Date.now(),
+            },
+          })) as MessageV2.Assistant
+
+          const warning = workflowConfig.verify.afterEdit && workflowState.verify?.required
+            ? "Finish requested. Minimal mode does not enforce gates. Verification is recommended before closing out."
+            : "Finish requested. Minimal mode does not enforce gates. Consider running tests/lint/typecheck or switching to workflow."
+
+          await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: assistantMessage.id,
+            sessionID: assistantMessage.sessionID,
+            type: "text",
+            text: warning,
+          } satisfies MessageV2.TextPart)
+
+          assistantMessage.finish = "stop"
+          assistantMessage.time.completed = Date.now()
+          await Session.updateMessage(assistantMessage)
+        }
+
         continue
       }
 

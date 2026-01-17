@@ -382,6 +382,35 @@ export function isVerificationCommand(command: string, config: WorkflowConfig): 
   return false
 }
 
+const FINISH_INTENT_PHRASES = new Set([
+  "done",
+  "finish",
+  "finished",
+  "all done",
+  "all set",
+  "that's all",
+  "that is all",
+  "wrap up",
+  "wrap it up",
+  "ship it",
+  "ship",
+  "complete",
+  "complete it",
+  "close it",
+  "close out",
+  "exit",
+  "quit",
+])
+
+export function isFinishIntent(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  if (trimmed.length > 64) return false
+  const normalized = trimmed.toLowerCase().replace(/[.!?]+$/g, "").replace(/\s+/g, " ")
+  const withoutThanks = normalized.replace(/(,?\s*(thanks|thank you|thx))$/g, "").trim()
+  return FINISH_INTENT_PHRASES.has(withoutThanks)
+}
+
 function ensureNudge(nudge: WorkflowNudge | undefined): WorkflowNudge {
   return nudge ?? { signals: {} }
 }
