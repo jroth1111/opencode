@@ -25,6 +25,7 @@ const AVAILABLE_TOOLS = [
   "task",
   "todowrite",
   "todoread",
+  "todo",
 ]
 
 const AgentCreateCommand = cmd({

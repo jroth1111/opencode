@@ -35,7 +35,7 @@ import type { ReadTool } from "@/tool/read"
 import type { WriteTool } from "@/tool/write"
 import { BashTool } from "@/tool/bash"
 import type { GlobTool } from "@/tool/glob"
-import { TodoWriteTool } from "@/tool/todo"
+import { TodoTool, TodoWriteTool } from "@/tool/todo"
 import type { GrepTool } from "@/tool/grep"
 import type { ListTool } from "@/tool/ls"
 import type { EditTool } from "@/tool/edit"
@@ -43,6 +43,7 @@ import type { PatchTool } from "@/tool/patch"
 import type { WebFetchTool } from "@/tool/webfetch"
 import type { TaskTool } from "@/tool/task"
 import type { QuestionTool } from "@/tool/question"
+import { Task } from "@/task"
 import { useKeyboard, useRenderer, useTerminalDimensions, type JSX } from "@opentui/solid"
 import { useSDK } from "@tui/context/sdk"
 import { useCommandDialog } from "@tui/component/dialog-command"
@@ -74,6 +75,7 @@ import { PermissionPrompt } from "./permission"
 import { QuestionPrompt } from "./question"
 import { DialogExportOptions } from "../../ui/dialog-export-options"
 import { formatTranscript } from "../../util/transcript"
+import { formatTaskRunLine } from "../../util/task-run"
 
 addDefaultParsers(parsers.parsers)
 
@@ -1396,6 +1398,9 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
         <Match when={props.part.tool === "todowrite"}>
           <TodoWrite {...toolprops} />
         </Match>
+        <Match when={props.part.tool === "todo"}>
+          <TodoScoped {...toolprops} />
+        </Match>
         <Match when={props.part.tool === "question"}>
           <Question {...toolprops} />
         </Match>
@@ -1875,6 +1880,125 @@ function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
       <Match when={true}>
         <InlineTool icon="⚙" pending="Updating todos..." complete={false} part={props.part}>
           Updating todos...
+        </InlineTool>
+      </Match>
+    </Switch>
+  )
+}
+
+function TodoScoped(props: ToolProps<typeof TodoTool>) {
+  const { theme } = useTheme()
+  const sdk = useSDK()
+  const local = useLocal()
+  const route = useRouteData("session")
+
+  type RawRequestClient = {
+    request: (options: { url: string; responseStyle?: "data" | "fields"; query?: Record<string, unknown> }) => Promise<
+      unknown
+    >
+  }
+  const rawClient = () => (sdk.client as unknown as { client: RawRequestClient }).client
+
+  const todo = createMemo(() => props.metadata.todo as Task.Info | undefined)
+  const todos = createMemo(() => props.metadata.todos as Task.Info[] | undefined)
+  const todoId = createMemo(() => todo()?.id)
+  const lane = createMemo(() => todo()?.lane ?? props.input.lane ?? "session")
+
+  const [runs, setRuns] = createSignal<any[]>([])
+  const [children, setChildren] = createSignal<Task.Info[]>([])
+  const [loadingRuns, setLoadingRuns] = createSignal(false)
+  const [loadingChildren, setLoadingChildren] = createSignal(false)
+
+  createEffect(
+    on(todoId, (id) => {
+      if (!id) return
+      setLoadingRuns(true)
+      rawClient()
+        .request({
+          url: "/task-runs",
+          responseStyle: "data",
+          query: { todoId: id },
+        })
+        .then((data: unknown) => {
+          setRuns(Array.isArray(data) ? data : [])
+        })
+        .catch(() => setRuns([]))
+        .finally(() => setLoadingRuns(false))
+    }),
+  )
+
+  createEffect(
+    on(
+      () => [todoId(), lane()],
+      ([id, currentLane]) => {
+        if (!id) return
+        if (props.metadata.todos?.length) {
+          setChildren(props.metadata.todos as Task.Info[])
+          return
+        }
+        setLoadingChildren(true)
+        const query: Record<string, unknown> = { lane: currentLane }
+        if (currentLane === "session") {
+          query.sessionID = route.sessionID
+        } else {
+          query.agent = local.agent.current().name
+        }
+        rawClient()
+          .request({
+            url: `/todo/${id}/children`,
+            responseStyle: "data",
+            query,
+          })
+          .then((data: unknown) => {
+            setChildren(Array.isArray(data) ? (data as Task.Info[]) : [])
+          })
+          .catch(() => setChildren([]))
+          .finally(() => setLoadingChildren(false))
+      },
+    ),
+  )
+
+  const actionLabel = createMemo(() => props.input.action ?? "todo")
+
+  return (
+    <Switch>
+      <Match when={todo() || todos()?.length}>
+        <BlockTool title="# Todo" part={props.part}>
+          <box flexDirection="column" gap={1}>
+            <Show when={todo()}>
+              <TodoItem status={todo()!.status} content={todo()!.content} />
+            </Show>
+            <Show when={todos()?.length}>
+              <box flexDirection="column">
+                <For each={todos() ?? []}>{(item) => <TodoItem status={item.status} content={item.content} />}</For>
+              </box>
+            </Show>
+            <Show when={children().length}>
+              <box flexDirection="column" paddingLeft={2}>
+                <text fg={theme.textMuted}>Children</text>
+                <For each={children()}>{(child) => <TodoItem status={child.status} content={child.content} />}</For>
+              </box>
+            </Show>
+            <Show when={!children().length && loadingChildren()}>
+              <text fg={theme.textMuted}>Loading children...</text>
+            </Show>
+            <Show when={runs().length}>
+              <box flexDirection="column" paddingLeft={2}>
+                <text fg={theme.textMuted}>TaskRuns</text>
+                <For each={runs()}>
+                  {(run) => <text fg={theme.textMuted}>{formatTaskRunLine(run)}</text>}
+                </For>
+              </box>
+            </Show>
+            <Show when={!runs().length && loadingRuns()}>
+              <text fg={theme.textMuted}>Loading task runs...</text>
+            </Show>
+          </box>
+        </BlockTool>
+      </Match>
+      <Match when={true}>
+        <InlineTool icon="⚙" pending="Updating todo..." complete={false} part={props.part}>
+          {actionLabel()}
         </InlineTool>
       </Match>
     </Switch>

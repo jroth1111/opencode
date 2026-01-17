@@ -7,6 +7,7 @@ import { SplitBorder } from "@tui/component/border"
 import type { AssistantMessage, Session } from "@opencode-ai/sdk/v2"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
+import { isKickoffComplete } from "@/session/workflow"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -33,6 +34,16 @@ export function Header() {
   const sync = useSync()
   const session = createMemo(() => sync.session.get(route.sessionID)!)
   const messages = createMemo(() => sync.data.message[route.sessionID] ?? [])
+  const workflow = createMemo(() => (session() as any)?.workflow)
+  const mode = createMemo(() => {
+    const wf = workflow()
+    return wf?.mode as "minimal" | "workflow" | undefined
+  })
+  const track = createMemo(() => workflow()?.kickoff?.track as "fast" | "full" | undefined)
+  const kickoffRequired = createMemo(() => mode() === "workflow" && !isKickoffComplete(workflow()?.kickoff))
+  const planRequired = createMemo(() => workflow()?.plan?.required && !workflow()?.plan?.approved)
+  const verifyRequired = createMemo(() => workflow()?.verify?.required)
+  const nudgeSuggested = createMemo(() => mode() === "minimal" && workflow()?.nudge?.suggested && !workflow()?.nudge?.dismissed)
 
   const cost = createMemo(() => {
     const total = pipe(
@@ -62,6 +73,42 @@ export function Header() {
   const keybind = useKeybind()
   const command = useCommandDialog()
   const [hover, setHover] = createSignal<"parent" | "prev" | "next" | null>(null)
+  const WorkflowBadges = () => (
+    <Show when={mode() || track() || kickoffRequired() || nudgeSuggested() || planRequired() || verifyRequired()}>
+      <box flexDirection="row" gap={1} flexShrink={0}>
+        <Show when={mode()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.textMuted}>Mode: {mode()}</text>
+          </box>
+        </Show>
+        <Show when={track()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.textMuted}>Track: {track()}</text>
+          </box>
+        </Show>
+        <Show when={kickoffRequired()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>Kickoff required</text>
+          </box>
+        </Show>
+        <Show when={nudgeSuggested()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>Large task detected</text>
+          </box>
+        </Show>
+        <Show when={planRequired()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>Plan required</text>
+          </box>
+        </Show>
+        <Show when={verifyRequired()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>Verify required</text>
+          </box>
+        </Show>
+      </box>
+    </Show>
+  )
 
   return (
     <box flexShrink={0}>
@@ -112,13 +159,17 @@ export function Header() {
                   Next <span style={{ fg: theme.textMuted }}>{keybind.print("session_child_cycle")}</span>
                 </text>
               </box>
+              <WorkflowBadges />
               <box flexGrow={1} flexShrink={1} />
               <ContextInfo context={context} cost={cost} />
             </box>
           </Match>
           <Match when={true}>
             <box flexDirection="row" justifyContent="space-between" gap={1}>
-              <Title session={session} />
+              <box flexDirection="row" gap={2} alignItems="center">
+                <Title session={session} />
+                <WorkflowBadges />
+              </box>
               <ContextInfo context={context} cost={cost} />
             </box>
           </Match>
