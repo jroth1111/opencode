@@ -6,7 +6,7 @@ import { GrepTool } from "./grep"
 import { BatchTool } from "./batch"
 import { ReadTool } from "./read"
 import { TaskTool } from "./task"
-import { TodoWriteTool, TodoReadTool } from "./todo"
+import { TodoWriteTool, TodoReadTool, TodoTool } from "./todo"
 import { WebFetchTool } from "./webfetch"
 import { WriteTool } from "./write"
 import { InvalidTool } from "./invalid"
@@ -26,6 +26,8 @@ import { Log } from "@/util/log"
 import { LspTool } from "./lsp"
 import { Truncate } from "./truncation"
 import { PlanExitTool, PlanEnterTool } from "./plan"
+import { KickoffTool } from "./kickoff"
+import { FinishTool } from "./finish"
 
 export namespace ToolRegistry {
   const log = Log.create({ service: "tool.registry" })
@@ -91,10 +93,12 @@ export namespace ToolRegistry {
   async function all(): Promise<Tool.Info[]> {
     const custom = await state().then((x) => x.custom)
     const config = await Config.get()
+    const interactiveClients = ["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT)
+    const planToolsEnabled = interactiveClients
 
     return [
       InvalidTool,
-      ...(["app", "cli", "desktop"].includes(Flag.OPENCODE_CLIENT) ? [QuestionTool] : []),
+      ...(interactiveClients ? [QuestionTool, KickoffTool] : []),
       BashTool,
       ReadTool,
       GlobTool,
@@ -105,12 +109,14 @@ export namespace ToolRegistry {
       WebFetchTool,
       TodoWriteTool,
       TodoReadTool,
+      TodoTool,
+      FinishTool,
       WebSearchTool,
       CodeSearchTool,
       SkillTool,
       ...(Flag.OPENCODE_EXPERIMENTAL_LSP_TOOL ? [LspTool] : []),
       ...(config.experimental?.batch_tool === true ? [BatchTool] : []),
-      ...(Flag.OPENCODE_EXPERIMENTAL_PLAN_MODE && Flag.OPENCODE_CLIENT === "cli" ? [PlanExitTool, PlanEnterTool] : []),
+      ...(planToolsEnabled ? [PlanExitTool, PlanEnterTool] : []),
       ...custom,
     ]
   }

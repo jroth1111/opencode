@@ -22,6 +22,7 @@ import { Snapshot } from "@/snapshot"
 import type { Provider } from "@/provider/provider"
 import { PermissionNext } from "@/permission/next"
 import { Global } from "@/global"
+import { mergeState, resolveConfig } from "./workflow"
 
 export namespace Session {
   const log = Log.create({ service: "session" })
@@ -74,6 +75,117 @@ export namespace Session {
           partID: z.string().optional(),
           snapshot: z.string().optional(),
           diff: z.string().optional(),
+        })
+        .optional(),
+      workflow: z
+        .object({
+          mode: z.enum(["minimal", "workflow"]).optional(),
+          kickoff: z
+            .object({
+              intent: z.string().optional(),
+              scope: z.string().optional(),
+              risk: z.enum(["low", "medium", "high"]).optional(),
+              definitionOfDone: z.string().optional(),
+              acceptance: z.array(z.string()).optional(),
+              webSearchGate: z
+                .object({
+                  q1ExternalTruth: z.boolean().optional(),
+                  q2VersionedFact: z.boolean().optional(),
+                  q3UnexplainedFailure: z.boolean().optional(),
+                  q4SecurityBoundary: z.boolean().optional(),
+                  q5HighCostDecision: z.boolean().optional(),
+                  references: z.array(z.string()).optional(),
+                  versions: z.array(z.string()).optional(),
+                })
+                .optional(),
+              track: z.enum(["fast", "full"]).optional(),
+            })
+            .optional(),
+          nudge: z
+            .object({
+              suggested: z.boolean().optional(),
+              suggestedAt: z.number().optional(),
+              dismissed: z.boolean().optional(),
+              reason: z.string().optional(),
+              signals: z
+                .object({
+                  promptChars: z.number().optional(),
+                  keywordHit: z.string().optional(),
+                  edits: z.number().optional(),
+                  filesTouched: z.number().optional(),
+                  dependencyTouched: z.boolean().optional(),
+                  scaffoldCommand: z.string().optional(),
+                  blockingTodos: z.number().optional(),
+                })
+                .optional(),
+            })
+            .optional(),
+          plan: z
+            .object({
+              required: z.boolean().optional(),
+              approved: z.boolean().optional(),
+              lastPlanPath: z.string().optional(),
+              lastPlanUpdatedAt: z.number().optional(),
+            })
+            .optional(),
+          verify: z
+            .object({
+              required: z.boolean().optional(),
+              lastVerifiedAt: z.number().optional(),
+              lastCommand: z.string().optional(),
+              lastExitCode: z.number().optional(),
+            })
+            .optional(),
+          drift: z
+            .object({
+              active: z.boolean().optional(),
+              lastReason: z.string().optional(),
+              decision: z.enum(["fix_code", "update_spec", "abort"]).optional(),
+              lastDecisionAt: z.number().optional(),
+            })
+            .optional(),
+          // Legacy fields (kept for backward compatibility)
+          entry: z
+            .object({
+              intent: z.string().optional(),
+              constraints: z.string().optional(),
+              verification: z.string().optional(),
+              mode: z.enum(["minimal", "workflow"]).optional(),
+              riskGate: z
+                .object({
+                  q1ExternalTruth: z.boolean().optional(),
+                  q2VersionedFact: z.boolean().optional(),
+                  q3UnexplainedFailure: z.boolean().optional(),
+                  q4SecurityBoundary: z.boolean().optional(),
+                  q5HighCostDecision: z.boolean().optional(),
+                })
+                .optional(),
+            })
+            .optional(),
+          triage: z
+            .object({
+              scope: z.string().optional(),
+              risk: z.enum(["low", "medium", "high"]).optional(),
+              definitionOfDone: z.string().optional(),
+              acceptance: z.array(z.string()).optional(),
+              webSearchGate: z
+                .object({
+                  q1ExternalTruth: z.boolean().optional(),
+                  q2VersionedFact: z.boolean().optional(),
+                  q3UnexplainedFailure: z.boolean().optional(),
+                  q4SecurityBoundary: z.boolean().optional(),
+                  q5HighCostDecision: z.boolean().optional(),
+                  references: z.array(z.string()).optional(),
+                  versions: z.array(z.string()).optional(),
+                })
+                .optional(),
+              track: z.enum(["fast", "full"]).optional(),
+            })
+            .optional(),
+          planRequired: z.boolean().optional(),
+          planApproved: z.boolean().optional(),
+          verifyRequired: z.boolean().optional(),
+          lastVerifiedAt: z.number().optional(),
         })
         .optional(),
     })
@@ -196,6 +308,8 @@ export namespace Session {
     directory: string
     permission?: PermissionNext.Ruleset
   }) {
+    const workflowConfig = await resolveConfig()
+    const workflow = mergeState(undefined, workflowConfig)
     const result: Info = {
       id: Identifier.descending("session", input.id),
       slug: Slug.create(),
@@ -205,6 +319,7 @@ export namespace Session {
       parentID: input.parentID,
       title: input.title ?? createDefaultTitle(!!input.parentID),
       permission: input.permission,
+      workflow,
       time: {
         created: Date.now(),
         updated: Date.now(),

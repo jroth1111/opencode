@@ -1,14 +1,10 @@
-Use this tool to suggest switching to plan agent when the user's request would benefit from planning before implementation.
-
-If they explicitly mention wanting to create a plan ALWAYS call this tool first.
-
-This tool will ask the user if they want to switch to plan agent.
+Use this tool to require a plan before implementation. It marks the plan as required and points
+to the plan file path.
 
 Call this tool when:
-- The user's request is complex and would benefit from planning first
-- You want to research and design before making changes
+- The request is complex and would benefit from planning first
+- You want a clear execution plan before making changes
 - The task involves multiple files or significant architectural decisions
 
 Do NOT call this tool:
-- For simple, straightforward tasks
-- When the user explicitly wants immediate implementation
+- For simple, straightforward tasks (unless the user asks for a plan)

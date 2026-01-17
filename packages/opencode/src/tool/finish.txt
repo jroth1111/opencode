@@ -1,0 +1,3 @@
+Use this tool to validate workflow gates before declaring work complete.
+It checks kickoff completeness, plan approval, verification status, blocking todos,
+and Web Search Gate references/versions. In workflow mode it enforces these checks.

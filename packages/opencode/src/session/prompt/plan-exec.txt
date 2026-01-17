@@ -1,0 +1,13 @@
+# Execution Plan Template
+
+## Requirements
+- ...
+
+## Plan
+- ...
+
+## Verification
+- ...
+
+## Risks / Notes (optional)
+- ...

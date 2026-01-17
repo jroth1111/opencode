@@ -17,6 +17,7 @@ import { PermissionNext } from "@/permission/next"
 import { Question } from "@/question"
 import { Todo } from "./todo"
 import { Task } from "@/task"
+import { KickoffRequiredError, PlanRequiredError, VerifyRequiredError } from "./workflow"
 
 export namespace SessionProcessor {
   const DOOM_LOOP_THRESHOLD = 3
@@ -213,7 +214,10 @@ export namespace SessionProcessor {
 
                     if (
                       value.error instanceof PermissionNext.RejectedError ||
-                      value.error instanceof Question.RejectedError
+                      value.error instanceof Question.RejectedError ||
+                      value.error instanceof KickoffRequiredError ||
+                      value.error instanceof PlanRequiredError ||
+                      value.error instanceof VerifyRequiredError
                     ) {
                       blocked = shouldBreak
                     }

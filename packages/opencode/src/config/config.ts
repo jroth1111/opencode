@@ -1057,6 +1057,46 @@ export namespace Config {
             error: "For custom LSP servers, 'extensions' array is required.",
           },
         ),
+      workflow: z
+        .object({
+          mode: z.enum(["minimal", "workflow"]).optional().describe("Workflow mode"),
+          plan: z
+            .object({
+              mode: z.enum(["auto", "always", "off"]).optional().describe("Plan enforcement mode"),
+              keywords: z.array(z.string()).optional().describe("Keywords that trigger plan mode"),
+              min_prompt_chars: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("Minimum prompt length to trigger plan mode"),
+            })
+            .optional(),
+          verify: z
+            .object({
+              after_edit: z.boolean().optional().describe("Require verification after edits"),
+              commands: z.array(z.string()).optional().describe("Regex patterns to detect verification commands"),
+            })
+            .optional(),
+          nudge: z
+            .object({
+              enabled: z.boolean().optional().describe("Enable workflow mode nudge in minimal mode"),
+              min_prompt_chars: z.number().int().positive().optional().describe("Prompt length to trigger nudge"),
+              keywords: z.array(z.string()).optional().describe("Keywords that trigger nudge"),
+              max_edits: z.number().int().positive().optional().describe("Edit count to trigger nudge"),
+              max_files: z.number().int().positive().optional().describe("File count to trigger nudge"),
+              max_blocking_todos: z
+                .number()
+                .int()
+                .positive()
+                .optional()
+                .describe("Blocking todo count to trigger nudge"),
+              dependency_patterns: z.array(z.string()).optional().describe("Dependency file names to trigger nudge"),
+              scaffold_commands: z.array(z.string()).optional().describe("Regex patterns to detect scaffold commands"),
+            })
+            .optional(),
+        })
+        .optional(),
       instructions: z.array(z.string()).optional().describe("Additional instruction files or patterns to include"),
       layout: Layout.optional().describe("@deprecated Always uses stretch layout."),
       permission: Permission.optional(),

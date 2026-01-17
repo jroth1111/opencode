@@ -1,0 +1,3 @@
+Run the workflow kickoff wizard. This captures intent, scope, risk tier, definition of done,
+acceptance checks, web search gate signals, and the track (fast/full). It also switches the
+session into workflow mode.
