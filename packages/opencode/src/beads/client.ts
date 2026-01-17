@@ -9,17 +9,25 @@ import {
   BeadsIssueSchema,
   BeadsIssueWithCountsSchema,
   BeadsListArgsSchema,
+  BeadsReadyArgsSchema,
   BeadsCreateArgsSchema,
   BeadsUpdateArgsSchema,
   BeadsCloseArgsSchema,
+  BeadsCommentSchema,
+  BeadsCommentListArgsSchema,
+  BeadsCommentAddArgsSchema,
   RpcRequestSchema,
   RpcResponseSchema,
   type BeadsIssue,
   type BeadsIssueWithCounts,
   type BeadsListArgs,
+  type BeadsReadyArgs,
   type BeadsCreateArgs,
   type BeadsUpdateArgs,
   type BeadsCloseArgs,
+  type BeadsComment,
+  type BeadsCommentListArgs,
+  type BeadsCommentAddArgs,
 } from "@/beads/protocol"
 
 const log = Log.create({ service: "beads.client" })
@@ -169,6 +177,30 @@ export const Beads = {
     return data.map((item) => item.issue)
   },
 
+  async ready(args: BeadsReadyArgs): Promise<BeadsIssue[]> {
+    const cwd = cwdFromInstance()
+    const readyArgs = BeadsReadyArgsSchema.parse({
+      assignee: args.assignee,
+      unassigned: args.unassigned,
+      priority: args.priority,
+      issue_type: args.issue_type,
+      limit: args.limit ?? 10,
+      sort: args.sort ?? "hybrid",
+      labels: args.labels,
+      labels_any: args.labels_any,
+      parent_id: args.parent_id,
+      mol_type: args.mol_type,
+      include_deferred: args.include_deferred,
+    })
+    return request<BeadsIssue[]>(
+      "ready",
+      buildReadyRpcArgs(readyArgs),
+      cwd,
+      buildReadyArgs(readyArgs),
+      z.array(BeadsIssueSchema),
+    )
+  },
+
   async create(args: BeadsCreateArgs): Promise<BeadsIssue> {
     const cwd = cwdFromInstance()
     const createArgs = BeadsCreateArgsSchema.parse({
@@ -228,6 +260,37 @@ export const Beads = {
       BeadsIssueSchema,
     )
   },
+
+  comments: {
+    async list(args: BeadsCommentListArgs): Promise<BeadsComment[]> {
+      const cwd = cwdFromInstance()
+      const listArgs = BeadsCommentListArgsSchema.parse({
+        id: args.id,
+      })
+      return request<BeadsComment[]>(
+        "comment_list",
+        listArgs,
+        cwd,
+        buildCommentListArgs(listArgs),
+        z.array(BeadsCommentSchema),
+      )
+    },
+    async add(args: BeadsCommentAddArgs): Promise<BeadsComment> {
+      const cwd = cwdFromInstance()
+      const addArgs = BeadsCommentAddArgsSchema.parse({
+        id: args.id,
+        author: args.author,
+        text: args.text,
+      })
+      return request<BeadsComment>(
+        "comment_add",
+        addArgs,
+        cwd,
+        buildCommentAddArgs(addArgs),
+        BeadsCommentSchema,
+      )
+    },
+  },
 }
 
 function buildListArgs(args: BeadsListArgs) {
@@ -250,6 +313,54 @@ function buildListArgs(args: BeadsListArgs) {
   return cliArgs
 }
 
+function buildReadyRpcArgs(args: BeadsReadyArgs) {
+  return {
+    assignee: args.assignee,
+    unassigned: args.unassigned,
+    priority: args.priority,
+    type: args.issue_type,
+    limit: args.limit,
+    sort_policy: args.sort,
+    labels: args.labels,
+    labels_any: args.labels_any,
+    parent_id: args.parent_id,
+    mol_type: args.mol_type,
+    include_deferred: args.include_deferred,
+  }
+}
+
+function buildReadyArgs(args: BeadsReadyArgs) {
+  const cliArgs = ["ready", "--limit", String(args.limit ?? 10), "--sort", args.sort ?? "hybrid"]
+  if (args.issue_type) {
+    cliArgs.push("--type", args.issue_type)
+  }
+  if (args.assignee) {
+    cliArgs.push("--assignee", args.assignee)
+  }
+  if (args.unassigned) {
+    cliArgs.push("--unassigned")
+  }
+  if (args.priority !== undefined) {
+    cliArgs.push("--priority", String(args.priority))
+  }
+  if (args.labels && args.labels.length > 0) {
+    cliArgs.push("--label", args.labels.join(","))
+  }
+  if (args.labels_any && args.labels_any.length > 0) {
+    cliArgs.push("--label-any", args.labels_any.join(","))
+  }
+  if (args.parent_id) {
+    cliArgs.push("--parent", args.parent_id)
+  }
+  if (args.mol_type) {
+    cliArgs.push("--mol-type", args.mol_type)
+  }
+  if (args.include_deferred) {
+    cliArgs.push("--include-deferred")
+  }
+  return cliArgs
+}
+
 function buildCreateArgs(args: BeadsCreateArgs) {
   const cliArgs = ["create", args.title]
   cliArgs.push("--type", args.issue_type ?? "task")
@@ -268,6 +379,18 @@ function buildCreateArgs(args: BeadsCreateArgs) {
   }
   if (args.description) {
     cliArgs.push("--description", args.description)
+  }
+  return cliArgs
+}
+
+function buildCommentListArgs(args: BeadsCommentListArgs) {
+  return ["comments", args.id]
+}
+
+function buildCommentAddArgs(args: BeadsCommentAddArgs) {
+  const cliArgs = ["comments", "add", args.id, args.text]
+  if (args.author) {
+    cliArgs.push("--author", args.author)
   }
   return cliArgs
 }

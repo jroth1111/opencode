@@ -168,4 +168,9 @@ The assistant did not use the todo list because this is a single command executi
    - Use numeric priority from 0 (P0, highest) to 4 (P4, lowest)
    - Default to 2 (P2) unless there's a strong reason to raise or lower it
 
+5. **Lanes and Checkpoints**:
+   - `lane` is optional and defaults to `session`
+   - Use `lane: "repo"` to store long-lived backlog items for the repository
+   - Use `checkpoint: true` for tasks that require explicit user approval before closing
+
 When in doubt, use this tool. Being proactive with task management demonstrates attentiveness and ensures you complete all requirements successfully.

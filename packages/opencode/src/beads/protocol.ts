@@ -35,6 +35,21 @@ export const BeadsListArgsSchema = z.object({
 })
 export type BeadsListArgs = z.infer<typeof BeadsListArgsSchema>
 
+export const BeadsReadyArgsSchema = z.object({
+  assignee: z.string().optional(),
+  unassigned: z.boolean().optional(),
+  priority: z.number().int().optional(),
+  issue_type: z.string().optional(),
+  limit: z.number().int().optional(),
+  sort: z.string().optional(),
+  labels: z.array(z.string()).optional(),
+  labels_any: z.array(z.string()).optional(),
+  parent_id: z.string().optional(),
+  mol_type: z.string().optional(),
+  include_deferred: z.boolean().optional(),
+})
+export type BeadsReadyArgs = z.infer<typeof BeadsReadyArgsSchema>
+
 export const BeadsIssueInputSchema = z.object({
   title: z.string(),
   description: z.string().optional(),
@@ -70,6 +85,27 @@ export const BeadsCloseArgsSchema = z.object({
   session: z.string().optional(),
 })
 export type BeadsCloseArgs = z.infer<typeof BeadsCloseArgsSchema>
+
+export const BeadsCommentSchema = z.object({
+  id: z.number().int(),
+  issue_id: z.string(),
+  author: z.string(),
+  text: z.string(),
+  created_at: z.string(),
+})
+export type BeadsComment = z.infer<typeof BeadsCommentSchema>
+
+export const BeadsCommentListArgsSchema = z.object({
+  id: z.string(),
+})
+export type BeadsCommentListArgs = z.infer<typeof BeadsCommentListArgsSchema>
+
+export const BeadsCommentAddArgsSchema = z.object({
+  id: z.string(),
+  author: z.string(),
+  text: z.string(),
+})
+export type BeadsCommentAddArgs = z.infer<typeof BeadsCommentAddArgsSchema>
 
 export const RpcRequestSchema = z.object({
   operation: z.string(),

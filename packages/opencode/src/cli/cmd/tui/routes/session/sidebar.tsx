@@ -1,5 +1,5 @@
 import { useSync } from "@tui/context/sync"
-import { createMemo, For, Show, Switch, Match } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Match, Show, Switch } from "solid-js"
 import { createStore } from "solid-js/store"
 import { useTheme } from "../../context/theme"
 import { Locale } from "@/util/locale"
@@ -12,6 +12,8 @@ import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
 import { Task } from "@/task"
+import { useSDK } from "@tui/context/sdk"
+import { useLocal } from "@tui/context/local"
 
 export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const sync = useSync()
@@ -20,6 +22,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   const diff = createMemo(() => sync.data.session_diff[props.sessionID] ?? [])
   const todo = createMemo(() => sync.data.todo[props.sessionID] ?? [])
   const messages = createMemo(() => sync.data.message[props.sessionID] ?? [])
+  const sdk = useSDK()
+  const local = useLocal()
 
   const [expanded, setExpanded] = createStore({
     mcp: true,
@@ -63,11 +67,75 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
 
   const directory = useDirectory()
   const kv = useKV()
+  const [todoLane, setTodoLane] = kv.signal<"session" | "repo" | "ready">("todo_lane", "session")
+  const [repoTodos, setRepoTodos] = createSignal<Task.Info[]>([])
+  const [readyTodos, setReadyTodos] = createSignal<Task.Info[]>([])
+  const [laneLoading, setLaneLoading] = createSignal(false)
+  const currentAgent = createMemo(() => local.agent.current().name)
+  type RawRequestClient = {
+    request: (options: { url: string; responseStyle?: "data" | "fields"; query?: Record<string, unknown> }) => Promise<
+      unknown
+    >
+  }
+  const rawClient = () => (sdk.client as unknown as { client: RawRequestClient }).client
 
   const hasProviders = createMemo(() =>
     sync.data.provider.some((x) => x.id !== "opencode" || Object.values(x.models).some((y) => y.cost?.input !== 0)),
   )
   const gettingStartedDismissed = createMemo(() => kv.get("dismissed_getting_started", false))
+
+  const laneTodos = createMemo(() => {
+    const lane = todoLane()
+    if (lane === "repo") return repoTodos()
+    if (lane === "ready") return readyTodos()
+    return todo()
+  })
+
+  const visibleTodos = createMemo(() => {
+    const items = laneTodos()
+    if (todoLane() === "session") return items.filter((item) => Task.isBlockingStatus(item.status))
+    return items
+  })
+
+  const cycleLane = () => {
+    const lanes: Array<"session" | "repo" | "ready"> = ["session", "repo", "ready"]
+    const next = lanes[(lanes.indexOf(todoLane()) + 1) % lanes.length]
+    setTodoLane(() => next)
+  }
+
+  createEffect(() => {
+    const lane = todoLane()
+    if (lane === "session") return
+    const agent = currentAgent()
+    setLaneLoading(true)
+    rawClient()
+      .request({
+        url: "/todo",
+        responseStyle: "data",
+        query: {
+          lane,
+          agent,
+        },
+      })
+      .then((data: unknown) => {
+        const items = (data ?? []) as Task.Info[]
+        if (lane === "repo") {
+          setRepoTodos(items)
+        } else {
+          setReadyTodos(items)
+        }
+      })
+      .catch(() => {
+        if (lane === "repo") {
+          setRepoTodos([])
+        } else {
+          setReadyTodos([])
+        }
+      })
+      .finally(() => {
+        setLaneLoading(false)
+      })
+  })
 
   return (
     <Show when={session()}>
@@ -202,25 +270,38 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                 </For>
               </Show>
             </box>
-            <Show when={todo().length > 0 && todo().some((t) => Task.isBlockingStatus(t.status))}>
-              <box>
-                <box
-                  flexDirection="row"
-                  gap={1}
-                  onMouseDown={() => todo().length > 2 && setExpanded("todo", !expanded.todo)}
-                >
-                  <Show when={todo().length > 2}>
-                    <text fg={theme.text}>{expanded.todo ? "▼" : "▶"}</text>
-                  </Show>
+            <box>
+              <box
+                flexDirection="row"
+                gap={1}
+                onMouseDown={() => {
+                  if (visibleTodos().length > 2) setExpanded("todo", !expanded.todo)
+                }}
+              >
+                <Show when={visibleTodos().length > 2}>
+                  <text fg={theme.text}>{expanded.todo ? "▼" : "▶"}</text>
+                </Show>
+                <box flexDirection="row" gap={1}>
                   <text fg={theme.text}>
                     <b>Todo</b>
                   </text>
+                  <text fg={theme.textMuted} onMouseDown={cycleLane}>
+                    ({todoLane()}
+                    {laneLoading() ? ", loading" : ""})
+                  </text>
                 </box>
-                <Show when={todo().length <= 2 || expanded.todo}>
-                  <For each={todo()}>{(todo) => <TodoItem status={todo.status} content={todo.content} />}</For>
-                </Show>
               </box>
-            </Show>
+              <Show
+                when={visibleTodos().length > 0}
+                fallback={<text fg={theme.textMuted}>No {todoLane()} todos</text>}
+              >
+                <Show when={visibleTodos().length <= 2 || expanded.todo}>
+                  <For each={visibleTodos()}>
+                    {(todo) => <TodoItem status={todo.status} content={todo.content} />}
+                  </For>
+                </Show>
+              </Show>
+            </box>
             <Show when={diff().length > 0}>
               <box>
                 <box

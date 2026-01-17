@@ -4,6 +4,9 @@ export namespace Task {
   export const Status = z.enum(["open", "in_progress", "blocked", "deferred", "closed"])
   export type Status = z.infer<typeof Status>
 
+  export const Lane = z.enum(["session", "repo"])
+  export type Lane = z.infer<typeof Lane>
+
   export const Priority = z.number().int().min(0).max(4)
   export type Priority = z.infer<typeof Priority>
 
@@ -13,6 +16,11 @@ export namespace Task {
       status: Status.describe("Current status of the task: open, in_progress, blocked, deferred, closed"),
       priority: Priority.describe("Priority level of the task: 0 (P0) - 4 (P4)"),
       id: z.string().describe("Unique identifier for the task"),
+      lane: Lane.optional().describe("Task lane: session (default) or repo"),
+      checkpoint: z
+        .boolean()
+        .optional()
+        .describe("Requires explicit approval before marking as closed"),
     })
     .meta({ ref: "Task" })
   export type Info = z.infer<typeof Info>
@@ -70,6 +78,13 @@ export namespace Task {
     }
   }
 
+  export function normalizeLane(lane?: string | null): Lane {
+    if (!lane) return "session"
+    const value = lane.trim().toLowerCase()
+    if (value === "repo") return "repo"
+    return "session"
+  }
+
   export function isBlockingStatus(status: string) {
     return ["open", "in_progress", "blocked"].includes(normalizeStatus(status))
   }
@@ -84,6 +99,8 @@ export namespace Task {
       id: task.id || task.content,
       status: normalizeStatus(task.status),
       priority: normalizePriority(task.priority),
+      lane: normalizeLane(task.lane),
+      checkpoint: !!task.checkpoint,
     }
   }
 

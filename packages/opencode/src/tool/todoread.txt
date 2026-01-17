@@ -8,7 +8,9 @@ the status of the current task list. You should make use of this tool as often a
 - After every few messages to ensure you're on track
 
 Usage:
-- This tool takes in no parameters. So leave the input blank or empty. DO NOT include a dummy object, placeholder string or a key like "input" or "empty". LEAVE IT BLANK.
+- Optional parameters:
+  - `lane`: "session" (default), "repo" (repository backlog), or "ready" (dependency-ready repo work)
+  - `agent`: filter repo tasks to a specific agent lane (defaults to current agent)
 - Returns a list of todo items with their status, priority, and content
 - Use this information to track progress and plan next steps
 - If no todos exist yet, an empty list will be returned

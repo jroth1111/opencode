@@ -38,6 +38,7 @@ import { SessionCompaction } from "../session/compaction"
 import { SessionRevert } from "../session/revert"
 import { lazy } from "../util/lazy"
 import { Todo } from "../session/todo"
+import { RepoTodo } from "../task/repo"
 import { InstanceBootstrap } from "../project/bootstrap"
 import { MCP } from "../mcp"
 import { Storage } from "../storage/storage"
@@ -78,6 +79,7 @@ export namespace Server {
   export const App: () => Hono = lazy(
     () =>
       // TODO: Break server.ts into smaller route files to fix type inference
+      // @ts-expect-error - Hono's route typing can become too deep in this file
       app
         .onError((err, c) => {
           log.error("failed", {
@@ -862,6 +864,53 @@ export namespace Server {
           async (c) => {
             const sessionID = c.req.valid("param").sessionID
             const todos = await Todo.get(sessionID)
+            return c.json(todos)
+          },
+        )
+        .get(
+          "/todo",
+          describeRoute({
+            summary: "Get todos by lane",
+            description: "Retrieve session or repository todos based on the requested lane.",
+            operationId: "todo.list",
+            responses: {
+              200: {
+                description: "Todo list",
+                content: {
+                  "application/json": {
+                    schema: resolver(Todo.Info.array()),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "query",
+            z
+              .object({
+                lane: z.enum(["session", "repo", "ready"]).optional(),
+                sessionID: z.string().optional(),
+                agent: z.string().optional(),
+                limit: z.coerce.number().int().optional(),
+              })
+              .refine((data) => (data.lane ?? "session") !== "session" || !!data.sessionID, {
+                message: "sessionID is required for session lane",
+                path: ["sessionID"],
+              }),
+          ),
+          async (c) => {
+            const query = c.req.valid("query")
+            const lane = query.lane ?? "session"
+            if (lane === "session") {
+              const todos = await Todo.get(query.sessionID!)
+              return c.json(todos)
+            }
+            if (lane === "ready") {
+              const todos = await RepoTodo.ready({ agent: query.agent, limit: query.limit })
+              return c.json(todos)
+            }
+            const todos = await RepoTodo.list({ agent: query.agent })
             return c.json(todos)
           },
         )

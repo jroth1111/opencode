@@ -1,4 +1,5 @@
 import { Task } from "./index"
+import { TaskLabels } from "./labels"
 import type { BeadsIssue, BeadsIssueInput } from "@/beads/protocol"
 
 const META_PREFIX = "OPENCODE_META:"
@@ -10,6 +11,8 @@ export type TaskMeta = {
   agent?: string
   status?: Task.Status
   priority?: Task.Priority
+  lane?: Task.Lane
+  checkpoint?: boolean
 }
 
 function encodeMeta(meta: TaskMeta) {
@@ -40,6 +43,8 @@ export function taskToBeadsIssue(
     agent: options?.agent,
     status: Task.normalizeStatus(task.status),
     priority: Task.normalizePriority(task.priority),
+    lane: Task.normalizeLane(task.lane),
+    checkpoint: task.checkpoint ? true : undefined,
   }
   return {
     title: task.content,
@@ -53,11 +58,15 @@ export function taskToBeadsIssue(
 
 export function beadsIssueToTask(issue: BeadsIssue, options?: { id?: string }): Task.Info {
   const meta = extractMeta(issue.description)
+  const checkpoint = meta?.checkpoint ?? TaskLabels.isCheckpoint(issue.labels)
+  const lane = meta?.lane ?? (TaskLabels.isRepoLabel(issue.labels) ? "repo" : "session")
   return Task.normalize({
     id: options?.id ?? meta?.id ?? issue.external_ref ?? issue.id,
     content: issue.title,
     status: Task.normalizeStatus(issue.status ?? meta?.status),
     priority: Task.normalizePriority(issue.priority ?? meta?.priority),
+    lane,
+    checkpoint,
   })
 }
 
