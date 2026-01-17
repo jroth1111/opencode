@@ -197,12 +197,13 @@ export namespace Config {
     const hasGitIgnore = await Bun.file(gitignore).exists()
     if (!hasGitIgnore) await Bun.write(gitignore, ["node_modules", "package.json", "bun.lock", ".gitignore"].join("\n"))
 
-    await BunProc.run(
-      ["add", "@opencode-ai/plugin@" + (Installation.isLocal() ? "latest" : Installation.VERSION), "--exact"],
-      {
-        cwd: dir,
-      },
-    ).catch(() => {})
+    const isSemver = (version: string) =>
+      /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)
+    const pluginVersion =
+      Installation.isLocal() || Installation.CHANNEL !== "latest" || !isSemver(Installation.VERSION)
+        ? "latest"
+        : Installation.VERSION
+    await BunProc.run(["add", `@opencode-ai/plugin@${pluginVersion}`, "--exact"], { cwd: dir }).catch(() => {})
 
     // Install any additional dependencies defined in the package.json
     // This allows local plugins and custom tools to use external packages
