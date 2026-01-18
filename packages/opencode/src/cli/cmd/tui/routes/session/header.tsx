@@ -7,7 +7,8 @@ import { SplitBorder } from "@tui/component/border"
 import type { AssistantMessage, Session } from "@opencode-ai/sdk/v2"
 import { useCommandDialog } from "@tui/component/dialog-command"
 import { useKeybind } from "../../context/keybind"
-import { isKickoffComplete } from "@/session/workflow"
+import { isKickoffComplete, webSearchGateStatus } from "@/session/workflow"
+import { Task } from "@/task"
 
 const Title = (props: { session: Accessor<Session> }) => {
   const { theme } = useTheme()
@@ -44,6 +45,20 @@ export function Header() {
   const planRequired = createMemo(() => workflow()?.plan?.required && !workflow()?.plan?.approved)
   const verifyRequired = createMemo(() => workflow()?.verify?.required)
   const nudgeSuggested = createMemo(() => mode() === "minimal" && workflow()?.nudge?.suggested && !workflow()?.nudge?.dismissed)
+  const todos = createMemo(() => sync.data.todo[route.sessionID] ?? [])
+  const blockingTodos = createMemo(() => todos().filter((todo) => Task.isBlockingStatus(todo.status)).length)
+  const wsg = createMemo(() => webSearchGateStatus(workflow()?.kickoff))
+  const wsgMissing = createMemo(() => {
+    const status = wsg()
+    return status.required && (status.missingReferences || status.missingVersions)
+  })
+  const wsgLabel = createMemo(() => {
+    const status = wsg()
+    const missing: string[] = []
+    if (status.missingReferences) missing.push("refs")
+    if (status.missingVersions) missing.push("versions")
+    return missing.length > 0 ? `WSG: ${missing.join(" + ")}` : "WSG: required"
+  })
 
   const cost = createMemo(() => {
     const total = pipe(
@@ -74,7 +89,18 @@ export function Header() {
   const command = useCommandDialog()
   const [hover, setHover] = createSignal<"parent" | "prev" | "next" | null>(null)
   const WorkflowBadges = () => (
-    <Show when={mode() || track() || kickoffRequired() || nudgeSuggested() || planRequired() || verifyRequired()}>
+    <Show
+      when={
+        mode() ||
+        track() ||
+        kickoffRequired() ||
+        nudgeSuggested() ||
+        planRequired() ||
+        verifyRequired() ||
+        wsgMissing() ||
+        blockingTodos() > 0
+      }
+    >
       <box flexDirection="row" gap={1} flexShrink={0}>
         <Show when={mode()}>
           <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
@@ -104,6 +130,16 @@ export function Header() {
         <Show when={verifyRequired()}>
           <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
             <text fg={theme.warning}>Verify required</text>
+          </box>
+        </Show>
+        <Show when={wsgMissing()}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>{wsgLabel()}</text>
+          </box>
+        </Show>
+        <Show when={blockingTodos() > 0}>
+          <box backgroundColor={theme.backgroundElement} paddingLeft={1} paddingRight={1}>
+            <text fg={theme.warning}>Todos: {blockingTodos()} blocking</text>
           </box>
         </Show>
       </box>

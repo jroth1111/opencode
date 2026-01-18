@@ -351,6 +351,47 @@ export function isKickoffComplete(kickoff: WorkflowKickoff | undefined): boolean
   return answered
 }
 
+export type WebSearchGateStatus = {
+  answered: boolean
+  required: boolean
+  missingReferences: boolean
+  missingVersions: boolean
+}
+
+export function webSearchGateStatus(kickoff: WorkflowKickoff | undefined): WebSearchGateStatus {
+  const gate = kickoff?.webSearchGate
+  if (!gate) {
+    return {
+      answered: false,
+      required: false,
+      missingReferences: false,
+      missingVersions: false,
+    }
+  }
+  const answered = [
+    gate.q1ExternalTruth,
+    gate.q2VersionedFact,
+    gate.q3UnexplainedFailure,
+    gate.q4SecurityBoundary,
+    gate.q5HighCostDecision,
+  ].every((item) => typeof item === "boolean")
+  const required = [
+    gate.q1ExternalTruth,
+    gate.q2VersionedFact,
+    gate.q3UnexplainedFailure,
+    gate.q4SecurityBoundary,
+    gate.q5HighCostDecision,
+  ].some((item) => item === true)
+  const missingReferences = required && (gate.references?.length ?? 0) === 0
+  const missingVersions = required && (gate.versions?.length ?? 0) === 0
+  return {
+    answered,
+    required,
+    missingReferences,
+    missingVersions,
+  }
+}
+
 export type PlanSectionSpec = {
   id: string
   label: string
