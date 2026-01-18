@@ -25,7 +25,11 @@ export function DialogConnectProvider(props: { provider: string }) {
   const globalSync = useGlobalSync()
   const globalSDK = useGlobalSDK()
   const platform = usePlatform()
-  const provider = createMemo(() => globalSync.data.provider.all.find((x) => x.id === props.provider)!)
+  const provider = createMemo(() => {
+    const found = globalSync.data.provider.all.find((x) => x.id === props.provider)
+    if (!found) throw new Error(`Provider not found: ${props.provider}`)
+    return found
+  })
   const methods = createMemo(
     () =>
       globalSync.data.provider_auth[props.provider] ?? [
