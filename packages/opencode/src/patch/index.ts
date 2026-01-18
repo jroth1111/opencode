@@ -79,12 +79,12 @@ export namespace Patch {
 
     if (line.startsWith("*** Add File:")) {
       const filePath = line.split(":", 2)[1]?.trim()
-      return filePath ? { filePath, nextIdx: startIdx + 1 } : null
+      return filePath && filePath.length > 0 ? { filePath, nextIdx: startIdx + 1 } : null
     }
 
     if (line.startsWith("*** Delete File:")) {
       const filePath = line.split(":", 2)[1]?.trim()
-      return filePath ? { filePath, nextIdx: startIdx + 1 } : null
+      return filePath && filePath.length > 0 ? { filePath, nextIdx: startIdx + 1 } : null
     }
 
     if (line.startsWith("*** Update File:")) {
@@ -408,7 +408,8 @@ export namespace Patch {
   }
 
   function seekSequence(lines: string[], pattern: string[], startIndex: number): number {
-    if (pattern.length === 0) return -1
+    if (pattern.length === 0 || lines.length === 0) return -1
+    if (startIndex >= lines.length) return -1
 
     // Simple substring search implementation
     for (let i = startIndex; i <= lines.length - pattern.length; i++) {

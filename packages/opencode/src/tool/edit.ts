@@ -183,6 +183,14 @@ export const LineTrimmedReplacer: Replacer = function* (content, find) {
     searchLines.pop()
   }
 
+  // Bounds validation to prevent crashes
+  if (searchLines.length === 0 || originalLines.length === 0) {
+    return
+  }
+  if (searchLines.length > originalLines.length) {
+    return
+  }
+
   for (let i = 0; i <= originalLines.length - searchLines.length; i++) {
     let matches = true
 
