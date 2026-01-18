@@ -351,11 +351,17 @@ export function isKickoffComplete(kickoff: WorkflowKickoff | undefined): boolean
   return answered
 }
 
-export function requiredPlanSections(): Array<{ id: string; pattern: RegExp }> {
+export type PlanSectionSpec = {
+  id: string
+  label: string
+  pattern: RegExp
+}
+
+export function requiredPlanSections(): PlanSectionSpec[] {
   return [
-    { id: "REQUIREMENTS", pattern: /\bREQUIREMENTS?\b|\bACCEPTANCE\b/i },
-    { id: "PLAN", pattern: /\bPLAN\b|\bSTEPS?\b/i },
-    { id: "VERIFICATION", pattern: /\bTESTS?\b|\bVERIFY\b|\bVERIFICATION\b/i },
+    { id: "REQUIREMENTS", label: "Requirements (or Acceptance)", pattern: /\bREQUIREMENTS?\b|\bACCEPTANCE\b/i },
+    { id: "PLAN", label: "Plan (or Steps)", pattern: /\bPLAN\b|\bSTEPS?\b/i },
+    { id: "VERIFICATION", label: "Verification (or Tests)", pattern: /\bTESTS?\b|\bVERIFY\b|\bVERIFICATION\b/i },
   ]
 }
 
@@ -366,6 +372,12 @@ export function validatePlanText(text: string): string[] {
     if (!section.pattern.test(text)) missing.push(section.id)
   }
   return missing
+}
+
+export function describeMissingPlanSections(missing: string[]): string[] {
+  const sections = requiredPlanSections()
+  const labels = new Map(sections.map((section) => [section.id, section.label]))
+  return missing.map((id) => labels.get(id) ?? id)
 }
 
 export function isVerificationCommand(command: string, config: WorkflowConfig): boolean {

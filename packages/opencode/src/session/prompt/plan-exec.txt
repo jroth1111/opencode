@@ -1,12 +1,13 @@
 # Execution Plan Template
+Required sections: Requirements, Plan, Verification.
 
-## Requirements
+## Requirements (required)
 - ...
 
-## Plan
+## Plan (required)
 - ...
 
-## Verification
+## Verification (required)
 - ...
 
 ## Risks / Notes (optional)
