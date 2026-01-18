@@ -1390,7 +1390,7 @@ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMess
           <Edit {...toolprops} />
         </Match>
         <Match when={props.part.tool === "task"}>
-          <Task {...toolprops} />
+          <TaskComponent {...toolprops} />
         </Match>
         <Match when={props.part.tool === "patch"}>
           <Patch {...toolprops} />
@@ -1722,7 +1722,7 @@ function WebSearch(props: ToolProps<any>) {
   )
 }
 
-function Task(props: ToolProps<typeof TaskTool>) {
+function TaskComponent(props: ToolProps<typeof TaskTool>) {
   const { theme } = useTheme()
   const keybind = useKeybind()
   const { navigate } = useRoute()
