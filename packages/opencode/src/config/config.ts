@@ -1060,6 +1060,11 @@ export namespace Config {
       workflow: z
         .object({
           mode: z.enum(["minimal", "workflow"]).optional().describe("Workflow mode"),
+          kickoff: z
+            .object({
+              attach: z.boolean().optional().describe("Attach kickoff summary to prompt context"),
+            })
+            .optional(),
           plan: z
             .object({
               mode: z.enum(["auto", "always", "off"]).optional().describe("Plan enforcement mode"),

@@ -8,6 +8,9 @@ export type GateEnforcement = "soft" | "hard"
 
 export type WorkflowConfig = {
   mode: WorkflowMode
+  kickoff: {
+    attach: boolean
+  }
   plan: {
     mode: WorkflowPlanMode
     keywords: string[]
@@ -137,6 +140,7 @@ const DEFAULT_KEYWORDS = [
 ]
 
 const DEFAULT_MIN_PROMPT_CHARS = 240
+const DEFAULT_KICKOFF_ATTACH = false
 const DEFAULT_VERIFY_COMMANDS = ["\\btest\\b", "\\blint\\b", "\\btypecheck\\b", "\\bcheck\\b", "\\bci\\b", "\\bverify\\b"]
 const DEFAULT_NUDGE_MIN_PROMPT_CHARS = 240
 const DEFAULT_NUDGE_MAX_EDITS = 3
@@ -199,6 +203,7 @@ export async function resolveConfig(): Promise<WorkflowConfig> {
   const planMode: WorkflowPlanMode = cfg.workflow?.plan?.mode ?? (mode === "workflow" ? "always" : "off")
   const keywords = cfg.workflow?.plan?.keywords ?? DEFAULT_KEYWORDS
   const minPromptChars = cfg.workflow?.plan?.min_prompt_chars ?? DEFAULT_MIN_PROMPT_CHARS
+  const kickoffAttach = cfg.workflow?.kickoff?.attach ?? DEFAULT_KICKOFF_ATTACH
 
   const verifyAfterEdit = cfg.workflow?.verify?.after_edit ?? true
   const verifyCommands = cfg.workflow?.verify?.commands ?? DEFAULT_VERIFY_COMMANDS
@@ -215,6 +220,9 @@ export async function resolveConfig(): Promise<WorkflowConfig> {
 
   return {
     mode,
+    kickoff: {
+      attach: kickoffAttach,
+    },
     plan: {
       mode: planMode,
       keywords,

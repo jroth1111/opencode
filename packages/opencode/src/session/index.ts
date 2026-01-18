@@ -354,6 +354,13 @@ export namespace Session {
     return path.join(base, [input.time.created, input.slug].join("-") + ".md")
   }
 
+  export function kickoff(input: { slug: string; time: { created: number } }) {
+    const base = Instance.project.vcs
+      ? path.join(Instance.worktree, ".opencode", "kickoff")
+      : path.join(Global.Path.data, "kickoff")
+    return path.join(base, [input.time.created, input.slug].join("-") + ".md")
+  }
+
   export const get = fn(Identifier.schema("session"), async (id) => {
     const read = await Storage.read<Info>(["session", Instance.project.id, id])
     return read as Info

@@ -2,6 +2,7 @@ import path from "path"
 import os from "os"
 import fs from "fs/promises"
 import z from "zod"
+import { pathToFileURL } from "url"
 import { Identifier } from "../id/id"
 import { MessageV2 } from "./message-v2"
 import { Log } from "../util/log"
@@ -85,6 +86,22 @@ export namespace SessionPrompt {
 
   function hasNonTextUserParts(parts: MessageV2.Part[]): boolean {
     return parts.some((part) => part.type !== "text" && !(part as MessageV2.Part & { synthetic?: boolean }).synthetic)
+  }
+
+  async function buildKickoffAttachment(session: Session.Info, attach: boolean) {
+    if (!attach) return
+    const kickoffPath = Session.kickoff(session)
+    const exists = await Bun.file(kickoffPath).exists()
+    if (!exists) return
+    const relative = path.relative(Instance.worktree, kickoffPath)
+    const filename = relative.startsWith("..") ? kickoffPath : relative
+    return {
+      type: "file",
+      mime: "text/plain",
+      filename,
+      url: pathToFileURL(kickoffPath).toString(),
+      synthetic: true,
+    } as MessageV2.FilePart
   }
 
   const state = Instance.state(
@@ -1328,6 +1345,8 @@ export namespace SessionPrompt {
       })
       session.workflow = workflowState
     }
+    const kickoffAttachment = await buildKickoffAttachment(session, workflowConfig.kickoff.attach)
+    const inputParts = kickoffAttachment ? [...input.parts, kickoffAttachment] : input.parts
     const info: MessageV2.Info = {
       id: input.messageID ?? Identifier.ascending("message"),
       role: "user",
@@ -1343,7 +1362,7 @@ export namespace SessionPrompt {
     }
 
     const parts = await Promise.all(
-      input.parts.map(async (part): Promise<MessageV2.Part[]> => {
+      inputParts.map(async (part): Promise<MessageV2.Part[]> => {
         if (part.type === "file") {
           // before checking the protocol we check if this is an mcp resource because it needs special handling
           if (part.source?.type === "resource") {

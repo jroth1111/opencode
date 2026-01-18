@@ -4,6 +4,9 @@ import { Question } from "../question"
 import { Session } from "../session"
 import { mergeState, planModeFor, resolveConfig, type WorkflowTrack } from "../session/workflow"
 import DESCRIPTION from "./kickoff.txt"
+import fs from "fs/promises"
+import path from "path"
+import { Instance } from "../project/instance"
 
 function firstAnswer(value: string[] | undefined): string | undefined {
   if (!value || value.length === 0) return
@@ -34,6 +37,17 @@ function normalizeTrack(value: string | undefined): WorkflowTrack | undefined {
   if (item.startsWith("fast")) return "fast"
   if (item.startsWith("full")) return "full"
   return undefined
+}
+
+function yesNoLabel(value: boolean | undefined): string {
+  if (value === true) return "Yes"
+  if (value === false) return "No"
+  return "n/a"
+}
+
+function formatList(items: string[]): string {
+  if (items.length === 0) return "- n/a"
+  return items.map((item) => `- ${item}`).join("\n")
 }
 
 export const KickoffTool = Tool.define("kickoff", async () => {
@@ -205,17 +219,67 @@ export const KickoffTool = Tool.define("kickoff", async () => {
         draft.workflow = nextWorkflow
       })
 
+      const kickoffPath = Session.kickoff(session)
+      await fs.mkdir(path.dirname(kickoffPath), { recursive: true })
+      const kickoffSummary = [
+        "# Kickoff Summary",
+        "",
+        `Captured: ${new Date().toISOString()}`,
+        `Session: ${session.title} (${session.id})`,
+        "",
+        "## Intent",
+        intent ?? "n/a",
+        "",
+        "## Scope",
+        scope ?? "n/a",
+        "",
+        "## Risk",
+        risk ?? "n/a",
+        "",
+        "## Definition of Done",
+        definitionOfDone ?? "n/a",
+        "",
+        "## Acceptance",
+        formatList(acceptance),
+        "",
+        "## Web Search Gate",
+        `- External truth: ${yesNoLabel(q1)}`,
+        `- Versioned fact: ${yesNoLabel(q2)}`,
+        `- Unexplained failure: ${yesNoLabel(q3)}`,
+        `- Security boundary/deps: ${yesNoLabel(q4)}`,
+        `- High-cost decision: ${yesNoLabel(q5)}`,
+        "",
+        "## References",
+        formatList(references),
+        "",
+        "## Versions",
+        formatList(versions),
+        "",
+        "## Track",
+        track ?? "n/a",
+        "",
+        "## Mode",
+        "workflow",
+        "",
+      ].join("\n")
+      await Bun.write(kickoffPath, kickoffSummary)
+
+      const kickoffLabel = (() => {
+        const relative = path.relative(Instance.worktree, kickoffPath)
+        return relative.startsWith("..") ? kickoffPath : relative
+      })()
       const output = [
         `Intent: ${intent ?? "n/a"}`,
         `Scope: ${scope ?? "n/a"}`,
         `Risk: ${risk ?? "n/a"}`,
         `Definition of Done: ${definitionOfDone ?? "n/a"}`,
         `Acceptance: ${acceptance.length > 0 ? acceptance.join("; ") : "n/a"}`,
-        `Web Search Gate: ${[q1, q2, q3, q4, q5].map((v) => (v === true ? "Yes" : v === false ? "No" : "n/a")).join(", ")}`,
+        `Web Search Gate: ${[q1, q2, q3, q4, q5].map((v) => yesNoLabel(v)).join(", ")}`,
         `References: ${references.length > 0 ? references.join("; ") : "n/a"}`,
         `Versions: ${versions.length > 0 ? versions.join("; ") : "n/a"}`,
         `Track: ${track ?? "n/a"}`,
         `Mode: workflow`,
+        `Kickoff summary: ${kickoffLabel}`,
       ].join("\n")
 
       return {
