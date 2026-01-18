@@ -66,23 +66,26 @@ export namespace SessionRetry {
     if (typeof error.data?.message === "string") {
       try {
         const json = JSON.parse(error.data.message)
-        if (json.type === "error" && json.error?.type === "too_many_requests") {
+        if (json?.type === "error" && json.error?.type === "too_many_requests") {
           return "Too Many Requests"
         }
-        if (json.code.includes("exhausted") || json.code.includes("unavailable")) {
+        if (json?.code && typeof json.code === "string" &&
+            (json.code.includes("exhausted") || json.code.includes("unavailable"))) {
           return "Provider is overloaded"
         }
-        if (json.type === "error" && json.error?.code?.includes("rate_limit")) {
+        if (json?.type === "error" && json.error?.code?.includes("rate_limit")) {
           return "Rate Limited"
         }
         if (
-          json.error?.message?.includes("no_kv_space") ||
-          (json.type === "error" && json.error?.type === "server_error") ||
-          !!json.error
+          json?.error?.message?.includes("no_kv_space") ||
+          (json?.type === "error" && json.error?.type === "server_error") ||
+          !!json?.error
         ) {
           return "Provider Server Error"
         }
-      } catch {}
+      } catch (e) {
+        // JSON parsing failed or malformed error structure - not retryable
+      }
     }
 
     return undefined

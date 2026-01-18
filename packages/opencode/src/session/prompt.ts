@@ -782,8 +782,8 @@ export namespace SessionPrompt {
       })
 
       // Check if user explicitly invoked an agent via @ in this turn
-      const lastUserMsg = msgs.findLast((m) => m.info.role === "user")
-      const bypassAgentCheck = lastUserMsg?.parts.some((p) => p.type === "agent") ?? false
+      const currentUserMsg = msgs.findLast((m) => m.info.role === "user")
+      const bypassAgentCheck = currentUserMsg?.parts.some((p) => p.type === "agent") ?? false
 
       const tools = await resolveTools({
         agent,
