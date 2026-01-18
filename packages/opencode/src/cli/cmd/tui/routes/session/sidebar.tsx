@@ -12,6 +12,7 @@ import { useDirectory } from "../../context/directory"
 import { useKV } from "../../context/kv"
 import { TodoItem } from "../../component/todo-item"
 import { Task } from "@/task"
+import { TaskMetrics } from "@/task/metrics"
 import { useSDK } from "@tui/context/sdk"
 import { useLocal } from "@tui/context/local"
 
@@ -97,6 +98,36 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     if (todoLane() === "ready") return items.filter((item) => Task.normalizeStatus(item.status) !== "draft")
     return items
   })
+
+  const laneSummary = createMemo(() => TaskMetrics.summarizeTodos(laneTodos()))
+  const summaryLabel = createMemo(() => {
+    const summary = laneSummary()
+    if (!summary.total) return ""
+    const parts: string[] = []
+    if (summary.ready > 0) parts.push(`${summary.ready} ready`)
+    if (summary.blocking > 0) parts.push(`${summary.blocking} blocking`)
+    if (summary.missingSpec > 0) parts.push(`${summary.missingSpec} spec`)
+    return parts.join(", ")
+  })
+
+  const laneMap = createMemo(() => {
+    const lane = todoLane()
+    if (lane === "session") return new Map(todo().map((item) => [item.id, item]))
+    if (lane === "repo") return new Map(repoTodos().map((item) => [item.id, item]))
+    return new Map<string, Task.Info>()
+  })
+
+  const blockedByDeps = (item: Task.Info) => {
+    if (todoLane() === "ready") return false
+    const deps = item.dependsOn ?? []
+    if (deps.length === 0) return false
+    const map = laneMap()
+    return deps.some((id) => {
+      const dep = map.get(id)
+      if (!dep) return true
+      return !Task.isDoneStatus(dep.status)
+    })
+  }
 
   const cycleLane = () => {
     const lanes: Array<"session" | "repo" | "ready"> = ["session", "repo", "ready"]
@@ -288,7 +319,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
                   </text>
                   <text fg={theme.textMuted} onMouseDown={cycleLane}>
                     ({todoLane()}
-                    {laneLoading() ? ", loading" : ""})
+                    {laneLoading() ? ", loading" : ""}
+                    {summaryLabel() ? ` • ${summaryLabel()}` : ""})
                   </text>
                 </box>
               </box>
@@ -298,7 +330,18 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
               >
                 <Show when={visibleTodos().length <= 2 || expanded.todo}>
                   <For each={visibleTodos()}>
-                    {(todo) => <TodoItem status={todo.status} content={todo.content} />}
+                    {(todo) => (
+                      <TodoItem
+                        status={todo.status}
+                        content={todo.content}
+                        dependsOn={todo.dependsOn}
+                        blocks={todo.blocks}
+                        missingSpec={Task.missingSpec(todo)}
+                        specComplete={Task.isSpecComplete(todo)}
+                        blockedByDeps={blockedByDeps(todo)}
+                        ready={todoLane() === "ready"}
+                      />
+                    )}
                   </For>
                 </Show>
               </Show>

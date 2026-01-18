@@ -9,6 +9,13 @@ import { TaskRun } from "@/task/run"
 export namespace TaskMetrics {
   type Tokens = NonNullable<TaskHistory.Entry["tokens"]>
 
+  export type TodoSummary = {
+    total: number
+    ready: number
+    blocking: number
+    missingSpec: number
+  }
+
   export type Metrics = {
     taskId: string
     updatedAt: string
@@ -222,6 +229,34 @@ export namespace TaskMetrics {
             lastSnapshot: checkpointSnapshots[checkpointSnapshots.length - 1],
           }
         : undefined,
+    }
+  }
+
+  function hasUnresolvedDeps(todo: Task.Info, byId: Map<string, Task.Info>) {
+    if (!todo.dependsOn || todo.dependsOn.length === 0) return false
+    return todo.dependsOn.some((id) => {
+      const dep = byId.get(id)
+      if (!dep) return true
+      return !Task.isDoneStatus(dep.status)
+    })
+  }
+
+  export function summarizeTodos(todos: Task.Info[]): TodoSummary {
+    const byId = new Map(todos.map((todo) => [todo.id, todo]))
+    let ready = 0
+    let blocking = 0
+    let missingSpec = 0
+    for (const todo of todos) {
+      if (Task.isBlockingStatus(todo.status)) blocking += 1
+      if (!Task.isSpecComplete(todo)) missingSpec += 1
+      const isOpen = Task.normalizeStatus(todo.status) === "open"
+      if (isOpen && !hasUnresolvedDeps(todo, byId)) ready += 1
+    }
+    return {
+      total: todos.length,
+      ready,
+      blocking,
+      missingSpec,
     }
   }
 

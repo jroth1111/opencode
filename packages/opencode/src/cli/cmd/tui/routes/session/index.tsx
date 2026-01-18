@@ -1866,13 +1866,36 @@ function Patch(props: ToolProps<typeof PatchTool>) {
 }
 
 function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
+  const todos = createMemo(() => (props.metadata.todos ?? props.input.todos ?? []) as Task.Info[])
+  const byId = createMemo(() => new Map(todos().map((todo) => [todo.id, todo])))
+  const blockedByDeps = (todo: Task.Info) => {
+    const deps = todo.dependsOn ?? []
+    if (deps.length === 0) return false
+    const map = byId()
+    return deps.some((id) => {
+      const dep = map.get(id)
+      if (!dep) return true
+      return !Task.isDoneStatus(dep.status)
+    })
+  }
   return (
     <Switch>
       <Match when={props.metadata.todos?.length}>
         <BlockTool title="# Todos" part={props.part}>
           <box>
-            <For each={props.input.todos ?? []}>
-              {(todo) => <TodoItem status={todo.status} content={todo.content} />}
+            <For each={todos()}>
+              {(todo) => (
+                <TodoItem
+                  status={todo.status}
+                  content={todo.content}
+                  dependsOn={todo.dependsOn}
+                  blocks={todo.blocks}
+                  missingSpec={Task.missingSpec(todo)}
+                  specComplete={Task.isSpecComplete(todo)}
+                  blockedByDeps={blockedByDeps(todo)}
+                  ready={Task.normalizeStatus(todo.status) === "open" && !blockedByDeps(todo)}
+                />
+              )}
             </For>
           </box>
         </BlockTool>
@@ -1903,6 +1926,18 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
   const todos = createMemo(() => props.metadata.todos as Task.Info[] | undefined)
   const todoId = createMemo(() => todo()?.id)
   const lane = createMemo(() => todo()?.lane ?? props.input.lane ?? "session")
+  const byId = createMemo(() => new Map((todos() ?? []).map((item) => [item.id, item])))
+  const blockedByDeps = (item: Task.Info) => {
+    const deps = item.dependsOn ?? []
+    if (deps.length === 0) return false
+    const map = byId()
+    if (map.size === 0) return false
+    return deps.some((id) => {
+      const dep = map.get(id)
+      if (!dep) return true
+      return !Task.isDoneStatus(dep.status)
+    })
+  }
 
   const [runs, setRuns] = createSignal<any[]>([])
   const [children, setChildren] = createSignal<Task.Info[]>([])
@@ -1966,17 +2001,52 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
         <BlockTool title="# Todo" part={props.part}>
           <box flexDirection="column" gap={1}>
             <Show when={todo()}>
-              <TodoItem status={todo()!.status} content={todo()!.content} />
+              <TodoItem
+                status={todo()!.status}
+                content={todo()!.content}
+                dependsOn={todo()!.dependsOn}
+                blocks={todo()!.blocks}
+                missingSpec={Task.missingSpec(todo()!)}
+                specComplete={Task.isSpecComplete(todo()!)}
+                blockedByDeps={blockedByDeps(todo()!)}
+                ready={Task.normalizeStatus(todo()!.status) === "open" && !blockedByDeps(todo()!)}
+              />
             </Show>
             <Show when={todos()?.length}>
               <box flexDirection="column">
-                <For each={todos() ?? []}>{(item) => <TodoItem status={item.status} content={item.content} />}</For>
+                <For each={todos() ?? []}>
+                  {(item) => (
+                    <TodoItem
+                      status={item.status}
+                      content={item.content}
+                      dependsOn={item.dependsOn}
+                      blocks={item.blocks}
+                      missingSpec={Task.missingSpec(item)}
+                      specComplete={Task.isSpecComplete(item)}
+                      blockedByDeps={blockedByDeps(item)}
+                      ready={Task.normalizeStatus(item.status) === "open" && !blockedByDeps(item)}
+                    />
+                  )}
+                </For>
               </box>
             </Show>
             <Show when={children().length}>
               <box flexDirection="column" paddingLeft={2}>
                 <text fg={theme.textMuted}>Children</text>
-                <For each={children()}>{(child) => <TodoItem status={child.status} content={child.content} />}</For>
+                <For each={children()}>
+                  {(child) => (
+                    <TodoItem
+                      status={child.status}
+                      content={child.content}
+                      dependsOn={child.dependsOn}
+                      blocks={child.blocks}
+                      missingSpec={Task.missingSpec(child)}
+                      specComplete={Task.isSpecComplete(child)}
+                      blockedByDeps={blockedByDeps(child)}
+                      ready={Task.normalizeStatus(child.status) === "open" && !blockedByDeps(child)}
+                    />
+                  )}
+                </For>
               </box>
             </Show>
             <Show when={!children().length && loadingChildren()}>

@@ -405,10 +405,14 @@ export namespace RepoTodo {
       })
       .sort(sortTodos)
     const filtered = todos.filter((todo) => Task.normalizeStatus(todo.status) !== "draft")
-    if (!filtered.some((todo) => todo.dependsOn && todo.dependsOn.length > 0)) return filtered
-    const allTodos = await listBeads({ status: "all" })
+    const needsDependencyData = filtered.some(
+      (todo) => (todo.dependsOn && todo.dependsOn.length > 0) || (todo.blocks && todo.blocks.length > 0),
+    )
+    if (!needsDependencyData) return filtered
+    const allTodos = await listBeads({ status: "all", agent: input?.agent })
     const byId = new Map(allTodos.map((todo) => [todo.id, todo]))
-    return filtered.filter((todo) => !hasUnresolvedDeps(todo, byId))
+    const enriched = filtered.map((todo) => byId.get(todo.id) ?? todo)
+    return enriched.filter((todo) => !hasUnresolvedDeps(todo, byId))
   }
 
   async function upsertBeads(input: {
