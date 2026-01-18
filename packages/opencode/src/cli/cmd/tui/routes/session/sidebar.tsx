@@ -92,14 +92,16 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
     return todo()
   })
 
+  const laneTasks = createMemo(() => laneTodos().map((item) => Task.normalize(item as Task.Info)))
+
   const visibleTodos = createMemo(() => {
-    const items = laneTodos()
+    const items = laneTasks()
     if (todoLane() === "session") return items.filter((item) => Task.isBlockingStatus(item.status))
     if (todoLane() === "ready") return items.filter((item) => Task.normalizeStatus(item.status) !== "draft")
     return items
   })
 
-  const laneSummary = createMemo(() => TaskMetrics.summarizeTodos(laneTodos()))
+  const laneSummary = createMemo(() => TaskMetrics.summarizeTodos(laneTasks()))
   const summaryLabel = createMemo(() => {
     const summary = laneSummary()
     if (!summary.total) return ""
@@ -111,10 +113,8 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
   })
 
   const laneMap = createMemo(() => {
-    const lane = todoLane()
-    if (lane === "session") return new Map(todo().map((item) => [item.id, item]))
-    if (lane === "repo") return new Map(repoTodos().map((item) => [item.id, item]))
-    return new Map<string, Task.Info>()
+    const items = laneTasks()
+    return new Map(items.map((item) => [item.id, item]))
   })
 
   const blockedByDeps = (item: Task.Info) => {

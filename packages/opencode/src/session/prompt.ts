@@ -88,7 +88,10 @@ export namespace SessionPrompt {
     return parts.some((part) => part.type !== "text" && !(part as MessageV2.Part & { synthetic?: boolean }).synthetic)
   }
 
-  async function buildKickoffAttachment(session: Session.Info, attach: boolean) {
+  async function buildKickoffAttachment(
+    session: Session.Info,
+    attach: boolean,
+  ): Promise<PromptInput["parts"][number] | undefined> {
     if (!attach) return
     const kickoffPath = Session.kickoff(session)
     const exists = await Bun.file(kickoffPath).exists()
@@ -101,7 +104,7 @@ export namespace SessionPrompt {
       filename,
       url: pathToFileURL(kickoffPath).toString(),
       synthetic: true,
-    } as MessageV2.FilePart
+    } as PromptInput["parts"][number]
   }
 
   const state = Instance.state(
