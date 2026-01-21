@@ -41,14 +41,11 @@ export namespace SessionCompaction {
     if (!error) return false
     if (MessageV2.OutputLengthError.isInstance(error)) return true
     if (MessageV2.APIError.isInstance(error)) {
-      const apiError = error as MessageV2.APIError & {
-        responseBody?: string
-        metadata?: { message?: string }
-      }
+      const apiError = error as MessageV2.APIError
       return (
-        isContextOverflowMessage(apiError.message) ||
-        isContextOverflowMessage(apiError.responseBody) ||
-        isContextOverflowMessage(apiError.metadata?.message)
+        isContextOverflowMessage(apiError.data.message) ||
+        isContextOverflowMessage(apiError.data.responseBody) ||
+        isContextOverflowMessage(apiError.data.metadata?.message)
       )
     }
     return false
