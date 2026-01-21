@@ -702,6 +702,8 @@ export namespace SessionPrompt {
             } satisfies MessageV2.ToolPart)
           }
           if (!result) {
+            const endTime = Date.now()
+            const startTime = part.state.status === "running" ? part.state.time.start : endTime
             await Session.updatePart({
               ...part,
               state: {
@@ -709,8 +711,8 @@ export namespace SessionPrompt {
                 input: part.state.input,
                 error: executionError?.message ?? "Finish gate failed",
                 time: {
-                  ...part.state.time,
-                  end: Date.now(),
+                  start: startTime,
+                  end: endTime,
                 },
               },
             } satisfies MessageV2.ToolPart)

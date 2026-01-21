@@ -128,32 +128,40 @@ const ChildTaskSchema = z.object({
 
 const ExpectedPatchSchema = TodoPatchSchema.partial()
 
-export const TodoTool = Tool.define("todo", {
+type TodoToolMetadata = {
+  todo?: Task.Info
+  todos?: Task.Info[]
+  graph?: Task.Graph
+}
+
+const TodoToolParams = z.object({
+  action: z.enum(["get", "update", "create_child", "list_children", "graph"]),
+  lane: z.enum(["session", "repo"]).optional(),
+  id: z.string().optional(),
+  parent_id: z.string().optional(),
+  patch: TodoPatchSchema.optional(),
+  expected_version: z
+    .number()
+    .int()
+    .optional()
+    .describe("Last seen version for strict conflict checks."),
+  expected: ExpectedPatchSchema.optional().describe("Expected field values for strict conflict checks."),
+  task: ChildTaskSchema.optional(),
+  limit: z.number().int().nonnegative().optional(),
+  depth: z.number().int().nonnegative().optional(),
+  include: z
+    .object({
+      parent: z.boolean().optional(),
+      deps: z.boolean().optional(),
+      children: z.boolean().optional(),
+    })
+    .optional(),
+})
+
+export const TodoTool = Tool.define<typeof TodoToolParams, TodoToolMetadata>("todo", {
   description:
     "Scoped todo operations for subagents (single-item get/update/create/list/graph) with strict conflict checks.",
-  parameters: z.object({
-    action: z.enum(["get", "update", "create_child", "list_children", "graph"]),
-    lane: z.enum(["session", "repo"]).optional(),
-    id: z.string().optional(),
-    parent_id: z.string().optional(),
-    patch: TodoPatchSchema.optional(),
-    expected_version: z
-      .number()
-      .int()
-      .optional()
-      .describe("Last seen version for strict conflict checks."),
-    expected: ExpectedPatchSchema.optional().describe("Expected field values for strict conflict checks."),
-    task: ChildTaskSchema.optional(),
-    limit: z.number().int().nonnegative().optional(),
-    depth: z.number().int().nonnegative().optional(),
-    include: z
-      .object({
-        parent: z.boolean().optional(),
-        deps: z.boolean().optional(),
-        children: z.boolean().optional(),
-      })
-      .optional(),
-  }),
+  parameters: TodoToolParams,
   async execute(params, ctx) {
     await ctx.ask({
       permission: "todo",

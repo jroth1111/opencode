@@ -38,6 +38,7 @@ import { SessionCompaction } from "../session/compaction"
 import { SessionRevert } from "../session/revert"
 import { lazy } from "../util/lazy"
 import { Todo } from "../session/todo"
+import { Task } from "../task"
 import { TaskRun } from "../task/run"
 import { TaskMutation } from "../task/mutation"
 import { RepoTodo } from "../task/repo"
@@ -968,6 +969,108 @@ export namespace Server {
             }
             const todo = await RepoTodo.getById({ todoId, agent: query.agent })
             return c.json(todo)
+          },
+        )
+        .patch(
+          "/todo/:todoId",
+          describeRoute({
+            summary: "Update todo fields",
+            description: "Update selected fields for a single todo item.",
+            operationId: "todo.update",
+            responses: {
+              200: {
+                description: "Updated todo",
+                content: {
+                  "application/json": {
+                    schema: resolver(Todo.Info),
+                  },
+                },
+              },
+              ...errors(400, 404),
+            },
+          }),
+          validator(
+            "param",
+            z.object({
+              todoId: z.string().meta({ description: "Todo ID" }),
+            }),
+          ),
+          validator(
+            "query",
+            z
+              .object({
+                lane: z.enum(["session", "repo"]).optional(),
+                sessionID: z.string().optional(),
+                agent: z.string().optional(),
+              })
+              .refine((data) => (data.lane ?? "session") !== "session" || !!data.sessionID, {
+                message: "sessionID is required for session lane",
+                path: ["sessionID"],
+              }),
+          ),
+          validator(
+            "json",
+            z.object({
+              patch: z.object({
+                status: z.string().optional(),
+                blocks: z.array(z.string()).optional(),
+                dependsOn: z.array(z.string()).optional(),
+                files: z.array(z.string()).optional(),
+                action: z.string().optional(),
+                verify: z.string().optional(),
+                done: z.string().optional(),
+                issueType: z.string().optional(),
+                labels: z.array(z.string()).optional(),
+              }),
+            }),
+          ),
+          async (c) => {
+            const { todoId } = c.req.valid("param")
+            const query = c.req.valid("query")
+            const body = c.req.valid("json")
+            const lane = query.lane ?? "session"
+            const { status: rawStatus, ...restPatch } = body.patch
+            const normalizedPatch: Partial<Task.Info> = {
+              ...restPatch,
+              ...(rawStatus ? { status: Task.normalizeStatus(rawStatus) } : {}),
+            }
+
+            if (lane === "session") {
+              const sessionID = query.sessionID!
+              const todos = await Todo.get(sessionID)
+              const index = todos.findIndex((todo) => todo.id === todoId)
+              if (index === -1) throw new Error(`Todo not found: ${todoId}`)
+              const current = todos[index]
+              const nextVersion = (current.version ?? 0) + 1
+              todos[index] = {
+                ...current,
+                ...normalizedPatch,
+                version: nextVersion,
+              }
+              const updated = await Todo.update({
+                sessionID,
+                agent: query.agent,
+                todos,
+              })
+              const next = updated.find((todo) => todo.id === todoId)
+              if (!next) throw new Error(`Todo not found: ${todoId}`)
+              return c.json(next)
+            }
+
+            const current = await RepoTodo.getById({ todoId, agent: query.agent })
+            const nextVersion = (current.version ?? 0) + 1
+            const updated = await RepoTodo.upsert({
+              sessionID: query.sessionID,
+              agent: query.agent,
+              todos: [
+                {
+                  ...current,
+                  ...normalizedPatch,
+                  version: nextVersion,
+                },
+              ],
+            })
+            return c.json(updated[0] ?? current)
           },
         )
         .get(

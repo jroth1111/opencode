@@ -3,7 +3,7 @@ import { Bus } from "@/bus"
 import z from "zod"
 import { Beads } from "@/beads/client"
 import { Task } from "@/task"
-import { TaskLabels, uniqueLabels } from "@/task/labels"
+import { TaskLabels, agentLabelsToRemove, filterUserLabels, uniqueLabels } from "@/task/labels"
 import { beadsIssueToTask, taskToBeadsIssue, taskToUI, uiToTask } from "@/task/adapters"
 import { TaskHistory } from "@/task/history"
 import { TaskState } from "@/task/state"
@@ -112,15 +112,15 @@ export namespace Todo {
     return { ...todo, assignee: agent }
   }
 
-  function applyTracker(todo: Info) {
+  function applyTracker(todo: Info): Info {
     if (todo.tracker?.id) return todo
-    return {
+    return Task.normalize({
       ...todo,
       tracker: {
         id: "beads",
         mode: "session",
       },
-    }
+    })
   }
 
   function normalizeDependencyIds(ids?: string[]) {
@@ -143,7 +143,7 @@ export namespace Todo {
     })
   }
 
-  function applySingleActive(todos: Info[]) {
+  function applySingleActive(todos: Info[]): Info[] {
     const inProgress = todos.filter((todo) => Task.normalizeStatus(todo.status) === "in_progress")
     if (inProgress.length <= 1) return todos
     const byId = new Map(todos.map((todo) => [todo.id, todo]))
@@ -160,13 +160,13 @@ export namespace Todo {
     if (!activeId) return todos
     return todos.map((todo) => {
       if (todo.id !== activeId && Task.normalizeStatus(todo.status) === "in_progress") {
-        return { ...todo, status: "open" }
+        return Task.normalize({ ...todo, status: "open" })
       }
       return todo
     })
   }
 
-  function applyWaveLimit(todos: Info[], maxBlocking: number) {
+  function applyWaveLimit(todos: Info[], maxBlocking: number): Info[] {
     if (!maxBlocking || maxBlocking <= 0) return todos
     const blocking = todos.filter((todo) => Task.isBlockingStatus(todo.status))
     if (blocking.length <= maxBlocking) return todos
@@ -192,7 +192,7 @@ export namespace Todo {
     const keep = new Set(ranked.slice(0, maxBlocking).map((todo) => todo.id))
     return todos.map((todo) => {
       if (!keep.has(todo.id) && Task.isBlockingStatus(todo.status)) {
-        return { ...todo, status: "deferred" }
+        return Task.normalize({ ...todo, status: "deferred" })
       }
       return todo
     })
@@ -236,8 +236,12 @@ export namespace Todo {
 
   function filterScopedPatch(patch: Partial<TodoPatch>) {
     const allowed: Partial<TodoPatch> = {}
+    const setAllowed = <K extends keyof TodoPatch>(field: K, value: TodoPatch[K]) => {
+      allowed[field] = value
+    }
     for (const field of SCOPED_PATCH_FIELDS) {
-      if (patch[field] !== undefined) allowed[field] = patch[field]
+      const value = patch[field]
+      if (value !== undefined) setAllowed(field, value as TodoPatch[typeof field])
     }
     const disallowed = Object.keys(patch).filter((field) => !(SCOPED_PATCH_FIELDS as string[]).includes(field))
     return { allowed, disallowed }
@@ -402,11 +406,13 @@ export namespace Todo {
       await Promise.all(
         state.todos.map((todo) => {
           const assigneeLabel = TaskLabels.agent(todo.assignee ?? state.agent)
+          const userLabels = filterUserLabels(todo.labels)
           const labels = uniqueLabels([
             labelSession,
             TaskLabels.todo(todo.id),
             assigneeLabel,
             todo.checkpoint ? TaskLabels.checkpoint() : undefined,
+            ...(userLabels ?? []),
           ])
           const base = taskToBeadsIssue(todo, {
             sessionID,
@@ -471,7 +477,7 @@ export namespace Todo {
     todos: Info[]
     existingByTodo: Map<string, BeadsIssue>
     tool?: { messageID: string; callID?: string }
-  }) {
+  }): Promise<Info[]> {
     const pending = input.todos.filter((todo) => {
       if (!todo.checkpoint) return false
       if (Task.normalizeStatus(todo.status) !== "closed") return false
@@ -516,14 +522,14 @@ export namespace Todo {
       if (decisions.get(todo.id)) return todo
       const existing = input.existingByTodo.get(todo.id)
       const fallback = existing ? Task.normalizeStatus(existing.status) : "blocked"
-      return {
+      return Task.normalize({
         ...todo,
         status: fallback === "closed" ? "blocked" : fallback,
-      }
+      })
     })
   }
 
-  function applySpecGate(input: { todos: Info[]; existingByTodo: Map<string, BeadsIssue> }) {
+  function applySpecGate(input: { todos: Info[]; existingByTodo: Map<string, BeadsIssue> }): Info[] {
     const pending = new Set(
       input.todos
         .filter((todo) => {
@@ -543,10 +549,10 @@ export namespace Todo {
       const existing = input.existingByTodo.get(todo.id)
       const prevStatus = existing ? Task.normalizeStatus(existing.status) : undefined
       const fallback = prevStatus && !Task.isDoneStatus(prevStatus) ? prevStatus : "blocked"
-      return {
+      return Task.normalize({
         ...todo,
         status: fallback,
-      }
+      })
     })
   }
 
@@ -589,25 +595,22 @@ export namespace Todo {
       const existingIssue = existingByTodo.get(todo.id)
       const existingTask = existingIssue ? beadsIssueToTask(existingIssue, { id: todo.id }) : undefined
       const currentVersion = existingTask?.version ?? 0
-      const nextVersion = existingIssue ? (todo.version ?? currentVersion + 1) : todo.version ?? 0
+      const nextVersion = existingIssue ? currentVersion + 1 : 0
       todo.version = nextVersion
       const ref = externalRef(input.sessionID, todo.id)
       const base = taskToBeadsIssue(todo, { sessionID: input.sessionID, agent: input.agent, externalRef: ref })
       base.dependencies = undefined
       base.parent = undefined
       const assigneeLabel = TaskLabels.agent(todo.assignee ?? input.agent)
+      const userLabels = filterUserLabels(todo.labels)
       const labels = uniqueLabels([
         labelSession,
         labelTodo,
         assigneeLabel,
         todo.checkpoint ? TaskLabels.checkpoint() : undefined,
+        ...(userLabels ?? []),
       ])
-      const removeLabels =
-        assigneeLabel && existingIssue?.labels
-          ? existingIssue.labels.filter(
-              (label) => label.startsWith(TaskLabels.prefixes.agent) && label !== assigneeLabel,
-            )
-          : undefined
+      const removeLabels = agentLabelsToRemove(existingIssue?.labels, assigneeLabel)
       const removeCheckpoint =
         !todo.checkpoint && existingIssue?.labels?.includes(TaskLabels.prefixes.checkpoint)
           ? [TaskLabels.prefixes.checkpoint]
@@ -991,14 +994,15 @@ export namespace Todo {
     base.dependencies = undefined
     base.parent = undefined
     const assigneeLabel = TaskLabels.agent(nextTask.assignee ?? run.agentType)
+    const userLabels = filterUserLabels(nextTask.labels)
     const labels = uniqueLabels([
       TaskLabels.session(input.sessionID),
       TaskLabels.todo(input.todoId),
       assigneeLabel,
       nextTask.checkpoint ? TaskLabels.checkpoint() : undefined,
+      ...(userLabels ?? []),
     ])
-    const removeLabels =
-      assigneeLabel && issue.labels ? issue.labels.filter((label) => label.startsWith(TaskLabels.prefixes.agent) && label !== assigneeLabel) : undefined
+    const removeLabels = agentLabelsToRemove(issue.labels, assigneeLabel)
     const removeCheckpoint =
       !nextTask.checkpoint && issue.labels?.includes(TaskLabels.prefixes.checkpoint) ? [TaskLabels.prefixes.checkpoint] : []
     const combinedRemove = uniqueLabels([...(removeLabels ?? []), ...removeCheckpoint])
@@ -1080,7 +1084,8 @@ export namespace Todo {
     const labelSession = TaskLabels.session(input.sessionID)
     const labelTodo = TaskLabels.todo(child.id)
     const assigneeLabel = TaskLabels.agent(child.assignee ?? run.agentType)
-    const labels = uniqueLabels([labelSession, labelTodo, assigneeLabel, TaskLabels.run(run.id)])
+    const userLabels = filterUserLabels(child.labels)
+    const labels = uniqueLabels([labelSession, labelTodo, assigneeLabel, TaskLabels.run(run.id), ...(userLabels ?? [])])
     const ref = externalRef(input.sessionID, child.id)
     const issue = await Beads.create({
       ...taskToBeadsIssue(child, { sessionID: input.sessionID, agent: run.agentType, externalRef: ref }),
@@ -1306,7 +1311,7 @@ export namespace Todo {
     const run = await TaskRun.get(input.runId)
     if (!run) return
     const issues = await Beads.list({
-      labels: [TaskLabels.session(input.sessionID), TaskLabels.run(run.id)],
+      labels: uniqueLabels([TaskLabels.session(input.sessionID), TaskLabels.run(run.id)]),
       status: "all",
       limit: 0,
       include_templates: false,
@@ -1341,7 +1346,7 @@ export namespace Todo {
     const run = await TaskRun.get(input.runId)
     if (!run) return
     const issues = await Beads.list({
-      labels: [TaskLabels.session(input.sessionID), TaskLabels.run(run.id)],
+      labels: uniqueLabels([TaskLabels.session(input.sessionID), TaskLabels.run(run.id)]),
       status: "all",
       limit: 0,
       include_templates: false,
@@ -1388,7 +1393,10 @@ export namespace Todo {
       .sort(sortTodos)
     const byId = new Map(todos.map((todo) => [todo.id, todo]))
     return todos.filter(
-      (todo) => Task.normalizeStatus(todo.status) === "open" && !hasUnresolvedDeps(todo, byId),
+      (todo) =>
+        Task.normalizeStatus(todo.status) === "open" &&
+        !hasUnresolvedDeps(todo, byId) &&
+        Task.isSpecComplete(todo),
     )
   }
 }

@@ -10,7 +10,7 @@ import { Snapshot } from "@/snapshot"
 import { Task } from "@/task"
 import { beadsIssueToTask, taskToBeadsIssue } from "@/task/adapters"
 import { TaskHistory } from "@/task/history"
-import { TaskLabels, uniqueLabels } from "@/task/labels"
+import { TaskLabels, agentLabelsToRemove, filterUserLabels, uniqueLabels } from "@/task/labels"
 import { TaskState } from "@/task/state"
 import { TaskRun } from "@/task/run"
 import { TaskMutation } from "@/task/mutation"
@@ -133,9 +133,9 @@ export namespace RepoTodo {
     return { id: "beads", mode: "repo" as const }
   }
 
-  function applyTracker(todo: Info, tracker?: Task.Tracker) {
+  function applyTracker(todo: Info, tracker?: Task.Tracker): Info {
     if (todo.tracker?.id || !tracker) return todo
-    return { ...todo, tracker }
+    return Task.normalize({ ...todo, tracker })
   }
 
   function normalizeDependencyIds(ids?: string[]) {
@@ -187,14 +187,21 @@ export namespace RepoTodo {
 
   function filterScopedPatch(patch: Partial<TodoPatch>) {
     const allowed: Partial<TodoPatch> = {}
+    const setAllowed = <K extends keyof TodoPatch>(field: K, value: TodoPatch[K]) => {
+      allowed[field] = value
+    }
     for (const field of SCOPED_PATCH_FIELDS) {
-      if (patch[field] !== undefined) allowed[field] = patch[field]
+      const value = patch[field]
+      if (value !== undefined) setAllowed(field, value as TodoPatch[typeof field])
     }
     const disallowed = Object.keys(patch).filter((field) => !(SCOPED_PATCH_FIELDS as string[]).includes(field))
     return { allowed, disallowed }
   }
 
-  function applySpecGate(input: { todos: Info[]; getPrevStatus: (todoId: string) => Task.Status | undefined }) {
+  function applySpecGate(input: {
+    todos: Info[]
+    getPrevStatus: (todoId: string) => Task.Status | undefined
+  }): Info[] {
     const pending = new Set(
       input.todos
         .filter((todo) => {
@@ -214,10 +221,10 @@ export namespace RepoTodo {
       const prevRaw = input.getPrevStatus(todo.id)
       const prevStatus = prevRaw ? Task.normalizeStatus(prevRaw) : undefined
       const fallback = prevStatus && !Task.isDoneStatus(prevStatus) ? prevStatus : "blocked"
-      return {
+      return Task.normalize({
         ...todo,
         status: fallback,
-      }
+      })
     })
   }
 
@@ -226,7 +233,7 @@ export namespace RepoTodo {
     todos: Info[]
     getPrevStatus: (todoId: string) => Task.Status | undefined
     tool?: { messageID: string; callID?: string }
-  }) {
+  }): Promise<Info[]> {
     const pending = input.todos.filter((todo) => {
       if (!todo.checkpoint) return false
       if (Task.normalizeStatus(todo.status) !== "closed") return false
@@ -240,10 +247,10 @@ export namespace RepoTodo {
         if (!pending.find((item) => item.id === todo.id)) return todo
         const prev = input.getPrevStatus(todo.id)
         const fallback = prev && !Task.isDoneStatus(prev) ? prev : "blocked"
-        return {
+        return Task.normalize({
           ...todo,
           status: fallback,
-        }
+        })
       })
     }
 
@@ -281,10 +288,10 @@ export namespace RepoTodo {
       if (decisions.get(todo.id)) return todo
       const prev = input.getPrevStatus(todo.id)
       const fallback = prev && !Task.isDoneStatus(prev) ? prev : "blocked"
-      return {
+      return Task.normalize({
         ...todo,
         status: fallback,
-      }
+      })
     })
   }
 
@@ -404,7 +411,9 @@ export namespace RepoTodo {
         return beadsIssueToTask(issue, { id: todoID })
       })
       .sort(sortTodos)
-    const filtered = todos.filter((todo) => Task.normalizeStatus(todo.status) !== "draft")
+    const filtered = todos.filter(
+      (todo) => Task.normalizeStatus(todo.status) !== "draft" && Task.isSpecComplete(todo),
+    )
     const needsDependencyData = filtered.some(
       (todo) => (todo.dependsOn && todo.dependsOn.length > 0) || (todo.blocks && todo.blocks.length > 0),
     )
@@ -467,25 +476,22 @@ export namespace RepoTodo {
       const existingIssue = existingByTodo.get(todo.id)
       const existingTask = existingIssue ? beadsIssueToTask(existingIssue, { id: todo.id }) : undefined
       const currentVersion = existingTask?.version ?? 0
-      const nextVersion = existingIssue ? (todo.version ?? currentVersion + 1) : todo.version ?? 0
+      const nextVersion = existingIssue ? currentVersion + 1 : 0
       todo.version = nextVersion
       const ref = TaskLabels.repoExternalRef(Instance.project.id, todo.id)
       const base = taskToBeadsIssue(todo, { agent: input.agent, externalRef: ref })
       base.dependencies = undefined
       base.parent = undefined
       const assigneeLabel = TaskLabels.agent(todo.assignee ?? input.agent)
+      const userLabels = filterUserLabels(todo.labels)
       const labels = uniqueLabels([
         repoLabel(),
         labelTodo,
         assigneeLabel,
         todo.checkpoint ? TaskLabels.checkpoint() : undefined,
+        ...(userLabels ?? []),
       ])
-      const removeLabels =
-        assigneeLabel && existingIssue?.labels
-          ? existingIssue.labels.filter(
-              (label) => label.startsWith(TaskLabels.prefixes.agent) && label !== assigneeLabel,
-            )
-          : undefined
+      const removeLabels = agentLabelsToRemove(existingIssue?.labels, assigneeLabel)
       const removeCheckpoint =
         !todo.checkpoint && existingIssue?.labels?.includes(TaskLabels.prefixes.checkpoint)
           ? [TaskLabels.prefixes.checkpoint]
@@ -877,11 +883,9 @@ export namespace RepoTodo {
     base.dependencies = undefined
     base.parent = undefined
     const assigneeLabel = TaskLabels.agent(next.assignee ?? run.agentType)
-    const labels = uniqueLabels([repoLabel(), TaskLabels.todo(input.todoId), assigneeLabel])
-    const removeLabels =
-      assigneeLabel && issue.labels
-        ? issue.labels.filter((label) => label.startsWith(TaskLabels.prefixes.agent) && label !== assigneeLabel)
-        : undefined
+    const userLabels = filterUserLabels(next.labels)
+    const labels = uniqueLabels([repoLabel(), TaskLabels.todo(input.todoId), assigneeLabel, ...(userLabels ?? [])])
+    const removeLabels = agentLabelsToRemove(issue.labels, assigneeLabel)
     const removeCheckpoint =
       !next.checkpoint && issue.labels?.includes(TaskLabels.prefixes.checkpoint) ? [TaskLabels.prefixes.checkpoint] : []
     const combinedRemove = uniqueLabels([...(removeLabels ?? []), ...removeCheckpoint])
@@ -1288,7 +1292,12 @@ export namespace RepoTodo {
     })
   }
 
-  export async function cleanupDraftChildren(input: { sessionID: string; runId: string; mode?: "close" | "archive" }) {
+  export async function cleanupDraftChildren(input: {
+    sessionID: string
+    runId: string
+    mode?: "close" | "archive"
+    agent?: string
+  }) {
     const run = await TaskRun.get(input.runId)
     if (!run) return
     const mode = await trackerMode()
@@ -1434,7 +1443,10 @@ export namespace RepoTodo {
       ? normalized.filter((todo) => (todo.assignee ?? input.agent) === input.agent)
       : normalized
     const ready = filtered.filter(
-      (todo) => Task.normalizeStatus(todo.status) === "open" && !hasUnresolvedDeps(todo, byId),
+      (todo) =>
+        Task.normalizeStatus(todo.status) === "open" &&
+        !hasUnresolvedDeps(todo, byId) &&
+        Task.isSpecComplete(todo),
     )
     const sorted = ready.sort(sortTodos)
     const limited = input?.limit && input.limit > 0 ? sorted.slice(0, input.limit) : sorted
@@ -1469,7 +1481,7 @@ export namespace RepoTodo {
     for (const todo of gatedTodos) {
       const prev = existingById.get(todo.id)
       const currentVersion = prev?.version ?? 0
-      todo.version = prev ? (todo.version ?? currentVersion + 1) : todo.version ?? 0
+      todo.version = prev ? currentVersion + 1 : 0
       byId.set(todo.id, todo)
     }
     const merged = Array.from(byId.values()).sort(sortTodos)

@@ -49,13 +49,14 @@ export function Header() {
   const verifyRequired = createMemo(() => workflow()?.verify?.required)
   const nudgeSuggested = createMemo(() => mode() === "minimal" && workflow()?.nudge?.suggested && !workflow()?.nudge?.dismissed)
   const [todoLane] = kv.signal<"session" | "repo" | "ready">("todo_lane", "session")
-  const todos = createMemo(() => sync.data.todo[route.sessionID] ?? [])
+  const rawTodos = createMemo(() => sync.data.todo[route.sessionID] ?? [])
+  const todos = createMemo(() => rawTodos().map((todo) => Task.fromTodo(todo)))
   const focusedTodo = createMemo(() => {
     const lane = todoLane()
     if (lane !== "session") {
       return (kv.get("focused_todo") as Task.Info | null | undefined) ?? undefined
     }
-    return Task.pickFocused(todos() as Task.Info[])
+    return Task.pickFocused(todos())
   })
   const activeTodos = createMemo(() => todos().filter((todo) => Task.isBlockingStatus(todo.status)))
   const missingSpec = createMemo(() => {

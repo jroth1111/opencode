@@ -15,7 +15,7 @@ export namespace Task {
       id: z.string().describe("Tracker plugin or backend id"),
       mode: z.enum(["session", "repo"]).optional().describe("Tracker scope"),
       path: z.string().optional().describe("Tracker storage path (if applicable)"),
-      config: z.record(z.any()).optional().describe("Tracker configuration metadata"),
+      config: z.record(z.string(), z.any()).optional().describe("Tracker configuration metadata"),
     })
     .describe("Task tracker metadata")
   export type Tracker = z.infer<typeof Tracker>
@@ -35,6 +35,7 @@ export namespace Task {
       issueType: z.string().optional().describe("Custom issue type"),
       tracker: Tracker.optional(),
       files: z.array(z.string()).optional().describe("Relevant files to touch or verify"),
+      labels: z.array(z.string()).optional().describe("Custom labels for grouping or filtering"),
       action: z.string().optional().describe("Implementation steps or approach"),
       verify: z.string().optional().describe("How to verify the task is complete"),
       done: z.string().optional().describe("Acceptance criteria for completion"),
@@ -127,12 +128,34 @@ export namespace Task {
     return "session"
   }
 
+  export function fromTodo(input: {
+    id: string
+    content: string
+    status?: string | null
+    priority?: number | string | null
+  }): Info {
+    return {
+      id: input.id,
+      content: input.content,
+      status: normalizeStatus(input.status ?? undefined),
+      priority: normalizePriority(input.priority),
+    }
+  }
+
   export function isBlockingStatus(status: string) {
     return ["open", "in_progress", "blocked"].includes(normalizeStatus(status))
   }
 
   export function isDoneStatus(status: string) {
     return ["closed", "deferred"].includes(normalizeStatus(status))
+  }
+
+  export function pickFocused(todos: Info[]): Info | undefined {
+    if (!todos || todos.length === 0) return
+    const blocking = todos.filter((todo) => isBlockingStatus(todo.status))
+    if (blocking.length === 0) return
+    const inProgress = blocking.find((todo) => normalizeStatus(todo.status) === "in_progress")
+    return inProgress ?? blocking[0]
   }
 
   export function normalize(task: Info): Info {
@@ -156,7 +179,8 @@ export namespace Task {
       if (!tracker) return undefined
       const id = tracker.id?.toString().trim()
       if (!id) return undefined
-      const mode = tracker.mode === "repo" ? "repo" : tracker.mode === "session" ? "session" : undefined
+      const mode: Lane | undefined =
+        tracker.mode === "repo" ? "repo" : tracker.mode === "session" ? "session" : undefined
       const path = tracker.path?.toString().trim()
       return {
         id,
@@ -176,6 +200,7 @@ export namespace Task {
       issueType: normalizeText(task.issueType),
       tracker: normalizeTracker(task.tracker),
       files: normalizeList(task.files),
+      labels: normalizeList(task.labels),
       action: normalizeText(task.action),
       verify: normalizeText(task.verify),
       done: normalizeText(task.done),

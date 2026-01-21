@@ -55,6 +55,7 @@ import { TodoItem } from "../../component/todo-item"
 import { DialogMessage } from "./dialog-message"
 import type { PromptInfo } from "../../component/prompt/history"
 import { DialogConfirm } from "@tui/ui/dialog-confirm"
+import { DialogPrompt } from "@tui/ui/dialog-prompt"
 import { DialogTimeline } from "./dialog-timeline"
 import { DialogForkFromTimeline } from "./dialog-fork-from-timeline"
 import { DialogSessionRename } from "../../component/dialog-session-rename"
@@ -114,6 +115,16 @@ export function Session() {
   const { theme } = useTheme()
   const promptRef = usePromptRef()
   const session = createMemo(() => sync.session.get(route.sessionID))
+  const [todoLane] = kv.signal<"session" | "repo" | "ready">("todo_lane", "session")
+  const rawTodos = createMemo(() => sync.data.todo[route.sessionID] ?? [])
+  const sessionTodos = createMemo(() => rawTodos().map((todo) => Task.fromTodo(todo)))
+  const focusedTodo = createMemo(() => {
+    const lane = todoLane()
+    if (lane !== "session") {
+      return (kv.get("focused_todo") as Task.Info | null | undefined) ?? undefined
+    }
+    return Task.pickFocused(sessionTodos())
+  })
   const children = createMemo(() => {
     const parentID = session()?.parentID ?? session()?.id
     return sync.data.session
@@ -281,6 +292,123 @@ export function Session() {
   }
 
   const local = useLocal()
+  type RawRequestClient = {
+    request: (options: {
+      url: string
+      method?: string
+      responseStyle?: "data" | "fields"
+      query?: Record<string, unknown>
+      body?: unknown
+    }) => Promise<unknown>
+  }
+  const rawClient = () => (sdk.client as unknown as { client: RawRequestClient }).client
+
+  type TodoLane = "session" | "repo"
+  const parseTodoRef = (value: string): { id: string; lane?: TodoLane } => {
+    const trimmed = value.trim()
+    if (!trimmed) return { id: "" }
+    const lower = trimmed.toLowerCase()
+    if (lower.startsWith("repo:")) {
+      return { id: trimmed.slice(5).trim(), lane: "repo" }
+    }
+    if (lower.startsWith("session:")) {
+      return { id: trimmed.slice(8).trim(), lane: "session" }
+    }
+    return { id: trimmed }
+  }
+
+  const fetchTodoById = async (todoId: string, laneHint?: TodoLane) => {
+    const lanes: TodoLane[] = laneHint ? [laneHint] : ["session", "repo"]
+    const agent = local.agent.current().name
+    for (const lane of lanes) {
+      const query = lane === "session" ? { lane, sessionID: route.sessionID, agent } : { lane, agent }
+      try {
+        const data = (await rawClient().request({
+          url: `/todo/${todoId}`,
+          responseStyle: "data",
+          query,
+        })) as Task.Info | undefined
+        if (data) return { todo: data, lane }
+      } catch {
+        // ignore lookup errors
+      }
+    }
+    return null
+  }
+
+  const editTodoSpec = async (dialog: ReturnType<typeof useDialog>, todoOverride?: Task.Info) => {
+    const directTodo = todoOverride
+    let todo: Task.Info | undefined
+    let lane: TodoLane | undefined
+    if (directTodo) {
+      todo = directTodo
+      lane = todo.lane === "repo" ? "repo" : "session"
+    } else {
+      const input = await DialogPrompt.show(dialog, "Edit todo spec", {
+        placeholder: "todo id (session: or repo:)",
+        description: () => (
+          <text fg={theme.textMuted}>Use session: or repo: prefix to choose a lane.</text>
+        ),
+      })
+      if (input === null) return
+      const parsed = parseTodoRef(input)
+      if (!parsed.id) {
+        dialog.clear()
+        toast.show({ message: "Todo id is required", variant: "error" })
+        return
+      }
+      dialog.clear()
+      const result = await fetchTodoById(parsed.id, parsed.lane)
+      if (!result) {
+        toast.show({ message: `Todo not found: ${parsed.id}`, variant: "error" })
+        return
+      }
+      todo = result.todo
+      lane = result.lane
+    }
+    if (!todo || !lane) {
+      toast.show({ message: "Todo not found", variant: "error" })
+      return
+    }
+    const verify = await DialogPrompt.show(dialog, "Verify steps", {
+      value: todo.verify ?? "",
+      placeholder: "How will you verify this task?",
+      description: () => <text fg={theme.textMuted}>Leave blank to clear.</text>,
+    })
+    if (verify === null) return
+    const done = await DialogPrompt.show(dialog, "Definition of done", {
+      value: todo.done ?? "",
+      placeholder: "What does done look like?",
+      description: () => <text fg={theme.textMuted}>Leave blank to clear.</text>,
+    })
+    if (done === null) return
+    dialog.clear()
+
+    const nextVerify = verify.trim()
+    const nextDone = done.trim()
+    const patch: Record<string, string> = {}
+    if ((todo.verify ?? "") !== nextVerify) patch.verify = nextVerify
+    if ((todo.done ?? "") !== nextDone) patch.done = nextDone
+    if (Object.keys(patch).length === 0) {
+      toast.show({ message: "No changes to save", variant: "info" })
+      return
+    }
+
+    const agent = local.agent.current().name
+    const query = lane === "session" ? { lane: "session", sessionID: route.sessionID, agent } : { lane: "repo", agent }
+    const updated = (await rawClient().request({
+      url: `/todo/${todo.id}`,
+      method: "PATCH",
+      responseStyle: "data",
+      query,
+      body: { patch },
+    })) as Task.Info | undefined
+    if (!updated) {
+      toast.show({ message: "Failed to update todo spec", variant: "error" })
+      return
+    }
+    toast.show({ message: "Todo spec updated", variant: "success" })
+  }
 
   function moveChild(direction: number) {
     if (children().length === 1) return
@@ -832,6 +960,15 @@ export function Session() {
           })
         }
         dialog.clear()
+      },
+    },
+    {
+      title: "Edit todo spec",
+      value: "todo.spec.edit",
+      keybind: "todo_spec_edit",
+      category: "Session",
+      onSelect: async (dialog) => {
+        await editTodoSpec(dialog, focusedTodo() ?? undefined)
       },
     },
   ])
@@ -1890,10 +2027,15 @@ function TodoWrite(props: ToolProps<typeof TodoWriteTool>) {
                   content={todo.content}
                   dependsOn={todo.dependsOn}
                   blocks={todo.blocks}
+                  labels={todo.labels}
                   missingSpec={Task.missingSpec(todo)}
                   specComplete={Task.isSpecComplete(todo)}
                   blockedByDeps={blockedByDeps(todo)}
-                  ready={Task.normalizeStatus(todo.status) === "open" && !blockedByDeps(todo)}
+                  ready={
+                    Task.normalizeStatus(todo.status) === "open" &&
+                    !blockedByDeps(todo) &&
+                    Task.isSpecComplete(todo)
+                  }
                 />
               )}
             </For>
@@ -1916,9 +2058,13 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
   const route = useRouteData("session")
 
   type RawRequestClient = {
-    request: (options: { url: string; responseStyle?: "data" | "fields"; query?: Record<string, unknown> }) => Promise<
-      unknown
-    >
+    request: (options: {
+      url: string
+      method?: string
+      responseStyle?: "data" | "fields"
+      query?: Record<string, unknown>
+      body?: unknown
+    }) => Promise<unknown>
   }
   const rawClient = () => (sdk.client as unknown as { client: RawRequestClient }).client
 
@@ -1943,6 +2089,53 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
   const [children, setChildren] = createSignal<Task.Info[]>([])
   const [loadingRuns, setLoadingRuns] = createSignal(false)
   const [loadingChildren, setLoadingChildren] = createSignal(false)
+  const [metrics, setMetrics] = createSignal<any | null>(null)
+  const [loadingMetrics, setLoadingMetrics] = createSignal(false)
+
+  const attemptSummary = createMemo(() => {
+    const attempts = metrics()?.attempts
+    if (!attempts) return ""
+    const parts = [
+      `${attempts.completed ?? 0} done`,
+      attempts.failed ? `${attempts.failed} failed` : undefined,
+      attempts.cancelled ? `${attempts.cancelled} cancelled` : undefined,
+      attempts.running ? `${attempts.running} running` : undefined,
+      attempts.queued ? `${attempts.queued} queued` : undefined,
+      attempts.retries ? `${attempts.retries} retries` : undefined,
+    ].filter(Boolean) as string[]
+    return `${attempts.total ?? 0} total${parts.length ? " · " + parts.join(" · ") : ""}`
+  })
+
+  const lastRunLine = createMemo(() => {
+    const lastRun = metrics()?.lastRun
+    if (!lastRun) return ""
+    return formatTaskRunLine(lastRun)
+  })
+
+  const historyEntries = createMemo(() => {
+    const entries = metrics()?.history
+    if (!Array.isArray(entries) || entries.length === 0) return []
+    return entries.slice(-5).reverse()
+  })
+
+  const formatTimestamp = (value?: string) => {
+    if (!value) return undefined
+    const parsed = Date.parse(value)
+    if (Number.isNaN(parsed)) return value
+    return Locale.todayTimeOrDateTime(parsed)
+  }
+
+  const formatHistoryLine = (entry: any) => {
+    const parts: string[] = []
+    const status = typeof entry?.status === "string" && entry.status.length ? entry.status : "unknown"
+    parts.push(status)
+    const time = formatTimestamp(entry?.timestamp)
+    if (time) parts.push(time)
+    if (Array.isArray(entry?.warnings) && entry.warnings.length > 0) {
+      parts.push(`warn:${entry.warnings.join(",")}`)
+    }
+    return parts.join(" · ")
+  }
 
   createEffect(
     on(todoId, (id) => {
@@ -1959,6 +2152,31 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
         })
         .catch(() => setRuns([]))
         .finally(() => setLoadingRuns(false))
+    }),
+  )
+
+  createEffect(
+    on(todoId, (id) => {
+      if (!id) {
+        setMetrics(null)
+        return
+      }
+      setLoadingMetrics(true)
+      setMetrics(null)
+      rawClient()
+        .request({
+          url: `/todo/${id}/metrics`,
+          responseStyle: "data",
+        })
+        .then((data: unknown) => {
+          if (data && typeof data === "object") {
+            setMetrics(data as Record<string, unknown>)
+          } else {
+            setMetrics(null)
+          }
+        })
+        .catch(() => setMetrics(null))
+        .finally(() => setLoadingMetrics(false))
     }),
   )
 
@@ -2006,10 +2224,15 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
                 content={todo()!.content}
                 dependsOn={todo()!.dependsOn}
                 blocks={todo()!.blocks}
+                labels={todo()!.labels}
                 missingSpec={Task.missingSpec(todo()!)}
                 specComplete={Task.isSpecComplete(todo()!)}
                 blockedByDeps={blockedByDeps(todo()!)}
-                ready={Task.normalizeStatus(todo()!.status) === "open" && !blockedByDeps(todo()!)}
+                ready={
+                  Task.normalizeStatus(todo()!.status) === "open" &&
+                  !blockedByDeps(todo()!) &&
+                  Task.isSpecComplete(todo()!)
+                }
               />
             </Show>
             <Show when={todos()?.length}>
@@ -2021,10 +2244,15 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
                       content={item.content}
                       dependsOn={item.dependsOn}
                       blocks={item.blocks}
+                      labels={item.labels}
                       missingSpec={Task.missingSpec(item)}
                       specComplete={Task.isSpecComplete(item)}
                       blockedByDeps={blockedByDeps(item)}
-                      ready={Task.normalizeStatus(item.status) === "open" && !blockedByDeps(item)}
+                      ready={
+                        Task.normalizeStatus(item.status) === "open" &&
+                        !blockedByDeps(item) &&
+                        Task.isSpecComplete(item)
+                      }
                     />
                   )}
                 </For>
@@ -2040,10 +2268,15 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
                       content={child.content}
                       dependsOn={child.dependsOn}
                       blocks={child.blocks}
+                      labels={child.labels}
                       missingSpec={Task.missingSpec(child)}
                       specComplete={Task.isSpecComplete(child)}
                       blockedByDeps={blockedByDeps(child)}
-                      ready={Task.normalizeStatus(child.status) === "open" && !blockedByDeps(child)}
+                      ready={
+                        Task.normalizeStatus(child.status) === "open" &&
+                        !blockedByDeps(child) &&
+                        Task.isSpecComplete(child)
+                      }
                     />
                   )}
                 </For>
@@ -2062,6 +2295,23 @@ function TodoScoped(props: ToolProps<typeof TodoTool>) {
             </Show>
             <Show when={!runs().length && loadingRuns()}>
               <text fg={theme.textMuted}>Loading task runs...</text>
+            </Show>
+            <Show when={attemptSummary()}>
+              <text fg={theme.textMuted}>Attempts: {attemptSummary()}</text>
+            </Show>
+            <Show when={lastRunLine()}>
+              <text fg={theme.textMuted}>Last run: {lastRunLine()}</text>
+            </Show>
+            <Show when={historyEntries().length}>
+              <box flexDirection="column" paddingLeft={2}>
+                <text fg={theme.textMuted}>History</text>
+                <For each={historyEntries()}>
+                  {(entry) => <text fg={theme.textMuted}>{formatHistoryLine(entry)}</text>}
+                </For>
+              </box>
+            </Show>
+            <Show when={!historyEntries().length && loadingMetrics()}>
+              <text fg={theme.textMuted}>Loading history...</text>
             </Show>
           </box>
         </BlockTool>
