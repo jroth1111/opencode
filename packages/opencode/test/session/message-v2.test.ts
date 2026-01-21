@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { MessageV2 } from "../../src/session/message-v2"
+import { COMPACTION_SUMMARY_PREFIX } from "../../src/session/compaction-constants"
 
 const sessionID = "session"
 
@@ -568,5 +569,88 @@ describe("session.message-v2.toModelMessage", () => {
     ]
 
     expect(MessageV2.toModelMessage(input)).toStrictEqual([])
+  })
+})
+
+describe("session.message-v2.filterCompacted", () => {
+  async function* stream(items: MessageV2.WithParts[]) {
+    for (const item of items.slice().reverse()) {
+      yield item
+    }
+  }
+
+  test("rebuilds history with recent user messages and summary prefix", async () => {
+    const user1 = "first message"
+    const user2 = "second message"
+    const summaryText = "summary text"
+    const after = "after compact"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo("u1"),
+        parts: [
+          {
+            ...basePart("u1", "p1"),
+            type: "text",
+            text: user1,
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: userInfo("u2"),
+        parts: [
+          {
+            ...basePart("u2", "p2"),
+            type: "text",
+            text: user2,
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: userInfo("compact"),
+        parts: [
+          {
+            ...basePart("compact", "c1"),
+            type: "compaction",
+            auto: true,
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: {
+          ...assistantInfo("summary", "compact"),
+          summary: true,
+          finish: "stop",
+        } as MessageV2.Assistant,
+        parts: [
+          {
+            ...basePart("summary", "s1"),
+            type: "text",
+            text: summaryText,
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: userInfo("u3"),
+        parts: [
+          {
+            ...basePart("u3", "p3"),
+            type: "text",
+            text: after,
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    const filtered = await MessageV2.filterCompacted(stream(input))
+    const modelMessages = MessageV2.toModelMessage(filtered)
+    const combined = JSON.stringify(modelMessages)
+
+    expect(combined).toContain(user1)
+    expect(combined).toContain(user2)
+    expect(combined).toContain(after)
+    expect(combined).toContain(COMPACTION_SUMMARY_PREFIX)
+    expect(combined).toContain(summaryText)
+    expect(combined).not.toContain("What did we do so far?")
   })
 })

@@ -55,6 +55,20 @@ export namespace Session {
           diffs: Snapshot.FileDiff.array().optional(),
         })
         .optional(),
+      usage: z
+        .object({
+          tokens: z.object({
+            input: z.number(),
+            output: z.number(),
+            reasoning: z.number(),
+            cache: z.object({
+              read: z.number(),
+              write: z.number(),
+            }),
+          }),
+          cost: z.number().optional(),
+        })
+        .optional(),
       share: z
         .object({
           url: z.string(),
@@ -405,6 +419,46 @@ export namespace Session {
     })
     return result
   }
+
+  function hasUsage(tokens: MessageV2.Assistant["tokens"]) {
+    return (
+      tokens.input > 0 ||
+      tokens.output > 0 ||
+      tokens.reasoning > 0 ||
+      tokens.cache.read > 0 ||
+      tokens.cache.write > 0
+    )
+  }
+
+  export const recordUsage = fn(
+    z.object({
+      sessionID: Identifier.schema("session"),
+      tokens: z.object({
+        input: z.number(),
+        output: z.number(),
+        reasoning: z.number(),
+        cache: z.object({
+          read: z.number(),
+          write: z.number(),
+        }),
+      }),
+      cost: z.number().optional(),
+    }),
+    async (input) => {
+      if (!hasUsage(input.tokens)) return
+      await update(input.sessionID, (draft) => {
+        draft.usage = {
+          tokens: input.tokens,
+          cost: input.cost,
+        }
+      })
+    },
+  )
+
+  export const getUsageTokens = fn(Identifier.schema("session"), async (sessionID) => {
+    const session = await get(sessionID)
+    return session.usage?.tokens
+  })
 
   export const diff = fn(Identifier.schema("session"), async (sessionID) => {
     const diffs = await Storage.read<Snapshot.FileDiff[]>(["session_diff", sessionID])

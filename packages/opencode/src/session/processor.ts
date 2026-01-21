@@ -277,7 +277,18 @@ export namespace SessionProcessor {
                     sessionID: input.sessionID,
                     messageID: input.assistantMessage.parentID,
                   })
-                  if (await SessionCompaction.isOverflow({ tokens: usage.tokens, model: input.model })) {
+                  Session.recordUsage({
+                    sessionID: input.sessionID,
+                    tokens: usage.tokens,
+                    cost: usage.cost,
+                  })
+                  if (
+                    await SessionCompaction.isOverflow({
+                      tokens: usage.tokens,
+                      model: input.model,
+                      sessionID: input.sessionID,
+                    })
+                  ) {
                     needsCompaction = true
                   }
                   break
@@ -348,6 +359,13 @@ export namespace SessionProcessor {
               stack: JSON.stringify(e.stack),
             })
             const error = MessageV2.fromError(e, { providerID: input.model.providerID })
+            if (SessionCompaction.isContextOverflowError(error)) {
+              log.warn("context overflow detected; scheduling compaction", {
+                sessionID: input.assistantMessage.sessionID,
+              })
+              needsCompaction = true
+              break
+            }
             const retry = SessionRetry.retryable(error)
             if (retry !== undefined) {
               attempt++

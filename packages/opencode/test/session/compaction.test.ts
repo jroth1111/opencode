@@ -102,6 +102,66 @@ describe("session.compaction.isOverflow", () => {
       },
     })
   })
+
+  test("uses auto_token_limit when configured", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            compaction: { auto_token_limit: 50_000 },
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const model = createModel({ context: 100_000, output: 32_000 })
+        const tokens = { input: 45_000, output: 10_000, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
+
+  test("uses effective_context_percent when configured", async () => {
+    await using tmp = await tmpdir({
+      init: async (dir) => {
+        await Bun.write(
+          path.join(dir, "opencode.json"),
+          JSON.stringify({
+            compaction: { effective_context_percent: 50 },
+          }),
+        )
+      },
+    })
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const model = createModel({ context: 100_000, output: 10_000 })
+        const tokens = { input: 46_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(await SessionCompaction.isOverflow({ tokens, model })).toBe(true)
+      },
+    })
+  })
+
+  test("falls back to session usage when tokens missing", async () => {
+    await using tmp = await tmpdir()
+    await Instance.provide({
+      directory: tmp.path,
+      fn: async () => {
+        const session = await Session.createNext({ directory: tmp.path })
+        await Session.recordUsage({
+          sessionID: session.id,
+          tokens: { input: 90_000, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          cost: 0,
+        })
+        const model = createModel({ context: 100_000, output: 10_000 })
+        const tokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+        expect(await SessionCompaction.isOverflow({ tokens, model, sessionID: session.id })).toBe(true)
+      },
+    })
+  })
 })
 
 describe("util.token.estimate", () => {

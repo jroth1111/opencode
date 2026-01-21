@@ -11,6 +11,8 @@ import { ProviderTransform } from "@/provider/transform"
 import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
 import { type SystemError } from "bun"
+import { Token } from "@/util/token"
+import { COMPACTION_SUMMARY_PREFIX } from "./compaction-constants"
 
 export namespace MessageV2 {
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -586,19 +588,90 @@ export namespace MessageV2 {
 
   export async function filterCompacted(stream: AsyncIterable<MessageV2.WithParts>) {
     const result = [] as MessageV2.WithParts[]
-    const completed = new Set<string>()
     for await (const msg of stream) {
       result.push(msg)
-      if (
-        msg.info.role === "user" &&
-        completed.has(msg.info.id) &&
-        msg.parts.some((part) => part.type === "compaction")
-      )
-        break
-      if (msg.info.role === "assistant" && msg.info.summary && msg.info.finish) completed.add(msg.info.parentID)
     }
     result.reverse()
-    return result
+    const lastSummaryIndex = result.findLastIndex((msg) => msg.info.role === "assistant" && msg.info.summary)
+    if (lastSummaryIndex === -1) return result
+
+    const summaryMessage = result[lastSummaryIndex]
+    const preSummary = result.slice(0, lastSummaryIndex)
+    const postSummary = result.slice(lastSummaryIndex + 1)
+
+    const userMessages = preSummary
+      .filter((msg) => msg.info.role === "user")
+      .filter((msg) => !msg.parts.some((part) => part.type === "compaction"))
+      .map((msg) => {
+        const text = msg.parts
+          .filter((part): part is MessageV2.TextPart => part.type === "text" && !part.ignored && !part.synthetic)
+          .map((part) => part.text)
+          .join("\n")
+          .trim()
+        return text
+      })
+      .filter((text) => text.length > 0)
+
+    const MAX_TOKENS = 20_000
+    const selected: string[] = []
+    let remaining = MAX_TOKENS
+    for (let i = userMessages.length - 1; i >= 0; i--) {
+      if (remaining <= 0) break
+      const message = userMessages[i]
+      const tokens = Token.estimate(message)
+      if (tokens <= remaining) {
+        selected.push(message)
+        remaining -= tokens
+      } else {
+        const maxChars = Math.max(0, remaining * 4)
+        const truncated = message.slice(0, maxChars).trimEnd()
+        selected.push(truncated.length ? `${truncated}\n…` : "")
+        break
+      }
+    }
+    selected.reverse()
+
+    const summaryText = summaryMessage.parts
+      .filter((part): part is MessageV2.TextPart => part.type === "text")
+      .map((part) => part.text)
+      .join("\n")
+      .trim()
+    const summaryBody = summaryText.length ? summaryText : "(no summary available)"
+    const summaryWithPrefix = `${COMPACTION_SUMMARY_PREFIX}\n${summaryBody}`
+
+    const makeSyntheticUser = (text: string): MessageV2.WithParts => {
+      const messageID = Identifier.ascending("message")
+      const sessionID = summaryMessage.info.sessionID
+      return {
+        info: {
+          id: messageID,
+          sessionID,
+          role: "user",
+          time: { created: Date.now() },
+          agent: summaryMessage.info.agent,
+          model: summaryMessage.info.model,
+        },
+        parts: [
+          {
+            id: Identifier.ascending("part"),
+            sessionID,
+            messageID,
+            type: "text",
+            text,
+            synthetic: true,
+          },
+        ],
+      }
+    }
+
+    const rebuilt: MessageV2.WithParts[] = []
+    for (const text of selected) {
+      if (!text.trim()) continue
+      rebuilt.push(makeSyntheticUser(text))
+    }
+    rebuilt.push(makeSyntheticUser(summaryWithPrefix))
+
+    return [...rebuilt, ...postSummary]
   }
 
   export function fromError(e: unknown, ctx: { providerID: string }) {

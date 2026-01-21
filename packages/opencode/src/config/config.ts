@@ -627,6 +627,7 @@ export namespace Config {
       session_unshare: z.string().optional().default("none").describe("Unshare current session"),
       session_interrupt: z.string().optional().default("escape").describe("Interrupt current session"),
       session_compact: z.string().optional().default("<leader>c").describe("Compact the session"),
+      todo_spec_edit: z.string().optional().default("<leader>o").describe("Edit focused todo spec"),
       messages_page_up: z.string().optional().default("pageup").describe("Scroll messages up by one page"),
       messages_page_down: z.string().optional().default("pagedown").describe("Scroll messages down by one page"),
       messages_half_page_up: z.string().optional().default("ctrl+alt+u").describe("Scroll messages up by half page"),
@@ -1115,6 +1116,14 @@ export namespace Config {
         .object({
           auto: z.boolean().optional().describe("Enable automatic compaction when context is full (default: true)"),
           prune: z.boolean().optional().describe("Enable pruning of old tool outputs (default: true)"),
+          auto_token_limit: z
+            .number()
+            .optional()
+            .describe("Token usage threshold triggering auto compaction (clamped to model context headroom)"),
+          effective_context_percent: z
+            .number()
+            .optional()
+            .describe("Percent of model context to treat as usable before auto compaction (default: 90)"),
         })
         .optional(),
       experimental: z

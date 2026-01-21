@@ -14,9 +14,41 @@ import { fn } from "@/util/fn"
 import { Agent } from "@/agent/agent"
 import { Plugin } from "@/plugin"
 import { Config } from "@/config/config"
+import { Storage } from "@/storage/storage"
 
 export namespace SessionCompaction {
   const log = Log.create({ service: "session.compaction" })
+  const CONTEXT_OVERFLOW_PATTERNS = [
+    "context length",
+    "context window",
+    "maximum context",
+    "max context",
+    "context limit",
+    "too many tokens",
+    "token limit",
+    "prompt is too long",
+    "input is too long",
+    "maximum number of tokens",
+  ]
+
+  function isContextOverflowMessage(message?: string) {
+    if (!message) return false
+    const lowered = message.toLowerCase()
+    return CONTEXT_OVERFLOW_PATTERNS.some((pattern) => lowered.includes(pattern))
+  }
+
+  export function isContextOverflowError(error: MessageV2.Assistant["error"] | undefined) {
+    if (!error) return false
+    if (MessageV2.OutputLengthError.isInstance(error)) return true
+    if (MessageV2.APIError.isInstance(error)) {
+      return (
+        isContextOverflowMessage(error.message) ||
+        isContextOverflowMessage(error.responseBody) ||
+        isContextOverflowMessage(error.metadata?.message)
+      )
+    }
+    return false
+  }
 
   export const Event = {
     Compacted: BusEvent.define(
@@ -27,15 +59,37 @@ export namespace SessionCompaction {
     ),
   }
 
-  export async function isOverflow(input: { tokens: MessageV2.Assistant["tokens"]; model: Provider.Model }) {
+  export async function isOverflow(input: {
+    tokens?: MessageV2.Assistant["tokens"]
+    model: Provider.Model
+    sessionID?: string
+  }) {
     const config = await Config.get()
     if (config.compaction?.auto === false) return false
     const context = input.model.limit.context
     if (context === 0) return false
-    const count = input.tokens.input + input.tokens.cache.read + input.tokens.output
     const output = Math.min(input.model.limit.output, SessionPrompt.OUTPUT_TOKEN_MAX) || SessionPrompt.OUTPUT_TOKEN_MAX
-    const usable = context - output
-    return count > usable
+    const maxUsable = Math.max(0, context - output)
+    const rawPercent = config.compaction?.effective_context_percent ?? 90
+    const percent = Math.min(100, Math.max(1, rawPercent))
+    const percentLimit = Math.floor((maxUsable * percent) / 100)
+    const configuredLimit = config.compaction?.auto_token_limit
+    const limit =
+      configuredLimit && configuredLimit > 0 ? Math.min(configuredLimit, maxUsable) : percentLimit
+
+    const hasUsage = (tokens?: MessageV2.Assistant["tokens"]) =>
+      !!tokens &&
+      (tokens.input > 0 ||
+        tokens.output > 0 ||
+        tokens.reasoning > 0 ||
+        tokens.cache.read > 0 ||
+        tokens.cache.write > 0)
+
+    const fallback = input.sessionID ? await Session.getUsageTokens(input.sessionID).catch(() => undefined) : undefined
+    const tokens = hasUsage(input.tokens) ? input.tokens : fallback
+    if (!tokens) return false
+    const count = tokens.input + tokens.cache.read + tokens.output + tokens.reasoning
+    return count > limit
   }
 
   export const PRUNE_MINIMUM = 20_000
@@ -101,37 +155,61 @@ export namespace SessionCompaction {
     const model = agent.model
       ? await Provider.getModel(agent.model.providerID, agent.model.modelID)
       : await Provider.getModel(userMessage.model.providerID, userMessage.model.modelID)
-    const msg = (await Session.updateMessage({
-      id: Identifier.ascending("message"),
-      role: "assistant",
-      parentID: input.parentID,
-      sessionID: input.sessionID,
-      mode: "compaction",
-      agent: "compaction",
-      summary: true,
-      path: {
-        cwd: Instance.directory,
-        root: Instance.worktree,
-      },
-      cost: 0,
-      tokens: {
-        output: 0,
-        input: 0,
-        reasoning: 0,
-        cache: { read: 0, write: 0 },
-      },
-      modelID: model.id,
-      providerID: model.providerID,
-      time: {
-        created: Date.now(),
-      },
-    })) as MessageV2.Assistant
-    const processor = SessionProcessor.create({
-      assistantMessage: msg,
-      sessionID: input.sessionID,
-      model,
-      abort: input.abort,
+
+    const removeMessage = async (messageID: string) => {
+      for (const part of await Storage.list(["part", messageID])) {
+        await Storage.remove(part)
+        await Bus.publish(MessageV2.Event.PartRemoved, {
+          sessionID: input.sessionID,
+          messageID,
+          partID: part.at(-1)!,
+        })
+      }
+      await Storage.remove(["message", input.sessionID, messageID])
+      await Bus.publish(MessageV2.Event.Removed, { sessionID: input.sessionID, messageID })
+    }
+
+    let trimmed = 0
+    let messages = input.messages
+
+    await Session.update(input.sessionID, (draft) => {
+      draft.time.compacting = Date.now()
     })
+
+    try {
+      while (true) {
+        const msg = (await Session.updateMessage({
+          id: Identifier.ascending("message"),
+          role: "assistant",
+          parentID: input.parentID,
+          sessionID: input.sessionID,
+          mode: "compaction",
+          agent: "compaction",
+          summary: true,
+          path: {
+            cwd: Instance.directory,
+            root: Instance.worktree,
+          },
+          cost: 0,
+          tokens: {
+            output: 0,
+            input: 0,
+            reasoning: 0,
+            cache: { read: 0, write: 0 },
+          },
+          modelID: model.id,
+          providerID: model.providerID,
+          time: {
+            created: Date.now(),
+          },
+        })) as MessageV2.Assistant
+
+        const processor = SessionProcessor.create({
+          assistantMessage: msg,
+          sessionID: input.sessionID,
+          model,
+          abort: input.abort,
+        })
     // Allow plugins to inject context or replace compaction prompt
     const compacting = await Plugin.trigger(
       "experimental.session.compacting",
@@ -141,55 +219,73 @@ export namespace SessionCompaction {
     const defaultPrompt =
       "Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."
     const promptText = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
-    const result = await processor.process({
-      user: userMessage,
-      agent,
-      abort: input.abort,
-      sessionID: input.sessionID,
-      tools: {},
-      system: [],
-      messages: [
-        ...MessageV2.toModelMessage(input.messages),
-        {
-          role: "user",
-          content: [
+        const result = await processor.process({
+          user: userMessage,
+          agent,
+          abort: input.abort,
+          sessionID: input.sessionID,
+          tools: {},
+          system: [],
+          messages: [
+            ...MessageV2.toModelMessage(messages),
             {
-              type: "text",
-              text: promptText,
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: promptText,
+                },
+              ],
             },
           ],
-        },
-      ],
-      model,
-    })
+          model,
+        })
 
-    if (result === "continue" && input.auto) {
-      const continueMsg = await Session.updateMessage({
-        id: Identifier.ascending("message"),
-        role: "user",
-        sessionID: input.sessionID,
-        time: {
-          created: Date.now(),
-        },
-        agent: userMessage.agent,
-        model: userMessage.model,
-      })
-      await Session.updatePart({
-        id: Identifier.ascending("part"),
-        messageID: continueMsg.id,
-        sessionID: input.sessionID,
-        type: "text",
-        synthetic: true,
-        text: "Continue if you have next steps",
-        time: {
-          start: Date.now(),
-          end: Date.now(),
-        },
+        const overflowed = result === "compact" || isContextOverflowError(processor.message.error)
+        if (overflowed) {
+          log.warn("compaction overflowed; trimming oldest message", { sessionID: input.sessionID, trimmed })
+          await removeMessage(msg.id).catch(() => {})
+          if (messages.length <= 1) return "stop"
+          messages = messages.slice(1)
+          trimmed++
+          continue
+        }
+
+        if (processor.message.error) return "stop"
+
+        if (result === "continue" && input.auto) {
+          const continueMsg = await Session.updateMessage({
+            id: Identifier.ascending("message"),
+            role: "user",
+            sessionID: input.sessionID,
+            time: {
+              created: Date.now(),
+            },
+            agent: userMessage.agent,
+            model: userMessage.model,
+          })
+          await Session.updatePart({
+            id: Identifier.ascending("part"),
+            messageID: continueMsg.id,
+            sessionID: input.sessionID,
+            type: "text",
+            synthetic: true,
+            text: "Continue if you have next steps",
+            time: {
+              start: Date.now(),
+              end: Date.now(),
+            },
+          })
+        }
+        if (trimmed > 0) log.info("compaction trimmed history", { sessionID: input.sessionID, trimmed })
+        Bus.publish(Event.Compacted, { sessionID: input.sessionID })
+        return "continue"
+      }
+    } finally {
+      await Session.update(input.sessionID, (draft) => {
+        draft.time.compacting = undefined
       })
     }
-    if (processor.message.error) return "stop"
-    Bus.publish(Event.Compacted, { sessionID: input.sessionID })
-    return "continue"
   }
 
   export const create = fn(
