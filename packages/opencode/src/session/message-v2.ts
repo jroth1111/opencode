@@ -639,6 +639,12 @@ export namespace MessageV2 {
     const summaryBody = summaryText.length ? summaryText : "(no summary available)"
     const summaryWithPrefix = `${COMPACTION_SUMMARY_PREFIX}\n${summaryBody}`
 
+    const baseAgent = summaryMessage.info.agent
+    const baseModel =
+      "model" in summaryMessage.info
+        ? summaryMessage.info.model
+        : { providerID: summaryMessage.info.providerID, modelID: summaryMessage.info.modelID }
+
     const makeSyntheticUser = (text: string): MessageV2.WithParts => {
       const messageID = Identifier.ascending("message")
       const sessionID = summaryMessage.info.sessionID
@@ -648,8 +654,8 @@ export namespace MessageV2 {
           sessionID,
           role: "user",
           time: { created: Date.now() },
-          agent: summaryMessage.info.agent,
-          model: summaryMessage.info.model,
+          agent: baseAgent,
+          model: baseModel,
         },
         parts: [
           {

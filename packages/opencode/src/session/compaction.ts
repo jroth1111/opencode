@@ -41,10 +41,14 @@ export namespace SessionCompaction {
     if (!error) return false
     if (MessageV2.OutputLengthError.isInstance(error)) return true
     if (MessageV2.APIError.isInstance(error)) {
+      const apiError = error as MessageV2.APIError & {
+        responseBody?: string
+        metadata?: { message?: string }
+      }
       return (
-        isContextOverflowMessage(error.message) ||
-        isContextOverflowMessage(error.responseBody) ||
-        isContextOverflowMessage(error.metadata?.message)
+        isContextOverflowMessage(apiError.message) ||
+        isContextOverflowMessage(apiError.responseBody) ||
+        isContextOverflowMessage(apiError.metadata?.message)
       )
     }
     return false
@@ -210,15 +214,15 @@ export namespace SessionCompaction {
           model,
           abort: input.abort,
         })
-    // Allow plugins to inject context or replace compaction prompt
-    const compacting = await Plugin.trigger(
-      "experimental.session.compacting",
-      { sessionID: input.sessionID },
-      { context: [], prompt: undefined },
-    )
-    const defaultPrompt =
-      "Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."
-    const promptText = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
+        // Allow plugins to inject context or replace compaction prompt
+        const compacting = await Plugin.trigger(
+          "experimental.session.compacting",
+          { sessionID: input.sessionID },
+          { context: [], prompt: undefined },
+        )
+        const defaultPrompt =
+          "Provide a detailed prompt for continuing our conversation above. Focus on information that would be helpful for continuing the conversation, including what we did, what we're doing, which files we're working on, and what we're going to do next considering new session will not have access to our conversation."
+        const promptText = compacting.prompt ?? [defaultPrompt, ...compacting.context].join("\n\n")
         const result = await processor.process({
           user: userMessage,
           agent,
