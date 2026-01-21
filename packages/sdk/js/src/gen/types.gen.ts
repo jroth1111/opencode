@@ -835,6 +835,10 @@ export type KeybindsConfig = {
    */
   session_compact?: string
   /**
+   * Edit focused todo spec
+   */
+  todo_spec_edit?: string
+  /**
    * Scroll messages up by one page
    */
   messages_page_up?: string

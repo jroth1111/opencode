@@ -120,6 +120,16 @@ export const TaskLabels = {
   },
 }
 
+export function agentLabelsToRemove(labels?: string[], keep?: string) {
+  if (!labels) return []
+  return labels.filter((label) => label.startsWith(AGENT_PREFIX) && label !== keep)
+}
+
+export function filterUserLabels(labels?: string[]) {
+  if (!labels) return []
+  return labels.filter((label) => !label.startsWith(PREFIX))
+}
+
 export function uniqueLabels(labels: Array<string | undefined>) {
   return Array.from(new Set(labels.filter(Boolean) as string[]))
 }

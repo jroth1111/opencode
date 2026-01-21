@@ -6,6 +6,7 @@ export interface TodoItemProps {
   content: string
   dependsOn?: string[]
   blocks?: string[]
+  labels?: string[]
   missingSpec?: string[]
   specComplete?: boolean
   blockedByDeps?: boolean
@@ -38,6 +39,11 @@ export function TodoItem(props: TodoItemProps) {
     meta.push(`spec:${props.missingSpec.join("+")}`)
   } else if (props.specComplete) {
     meta.push("spec:ok")
+  }
+  if (props.labels && props.labels.length > 0) {
+    const preview = props.labels.slice(0, 3).join(",")
+    const suffix = props.labels.length > 3 ? ",…" : ""
+    meta.push(`labels:${preview}${suffix}`)
   }
 
   return (
